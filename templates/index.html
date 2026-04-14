@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}ExoServe{% endblock %}
+
+{% block content %}
+<div id="layout">
+
+  <!-- File Explorer Panel -->
+  <div id="file-explorer" class="panel resizable-panel">
+
+    <!-- Folder List -->
+    <div id="folder-list" class="panel-content"></div>
+
+    <div class="key-info">
+      <pre id="key-name">No key set</pre>
+    </div>
+
+    <!-- Upload Buttons (Centered) -->
+    <div class="button-row border-top">
+      <button onclick="uploadFile()">Upload File</button>
+      <button onclick="uploadFolder()">Upload Folder</button>
+    </div>
+
+    <!-- Set Key File -->
+    <div class="button-row">
+      <button class="wide" onclick="setSessionKey()">Set Key</button>
+    </div>
+
+    <!-- Generate Key -->
+    <div class="button-row">
+      <button class="wide" onclick="generateAndDownloadKey()">Generate Key</button>
+    </div>
+
+  </div>
+
+  <!-- Collapsing Button -->
+  <button id="collapse-thumb" aria-label="Toggle file explorer">
+    ❮
+  </button>
+
+  <!-- File Preview Panel -->
+  <div id="file-details" class="panel fill">
+
+    <div id="file-preview" class="preview">
+      <h2>Select a file to preview</h2>
+    </div>
+
+  </div>
+</div>
+{% endblock %}

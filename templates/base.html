@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=0.75">
+        <title>{% block title %}ExoServe{% endblock %}</title>
+        <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}">
+        <link href="{{ url_for('static', filename='css/bootstrap.min.css') }}" rel="stylesheet">
+        <link href="{{ url_for('static', filename='css/custom.css') }}" rel="stylesheet">
+        <script src="{{ url_for('static', filename='js/carousel.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/e2ee.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/htmx.min.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/key-handler.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/resize.js') }}" defer></script>
+    </head>
+
+    <body>
+        <div class="container-fluid py-3">
+            {% block content %}{% endblock %}
+        </div>
+    </body>
+</html>

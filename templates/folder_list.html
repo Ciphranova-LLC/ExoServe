@@ -1,0 +1,30 @@
+<script>
+  fileList = [
+    {% for file in files %}
+      "{{ current_path }}/{{ file }}"{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+  currentFileIndex = -1;
+</script>
+
+
+<ul class="list-group">
+  {% for folder in folders %}
+    <li class="list-group-item">
+      <a href="#" onclick="if(sessionStorage.getItem('key_name')) { 
+              fetchFolder('{{ current_path }}/{{ folder }}'); 
+           } else { 
+              alert('Set key first'); 
+           }">
+        📁 {{ folder }}
+      </a>
+    </li>
+  {% endfor %}
+  {% for file in files %}
+    <li class="list-group-item">
+      <a href="#" onclick="setAndDownload('{{ loop.index0 }}')">
+        📄 {{ file }}
+      </a>
+    </li>
+  {% endfor %}
+</ul>

@@ -1,0 +1,15 @@
+MOST IMPORTANT:
+- I accidentally overwrote the current version with an old version
+- The current version allows arbitrary read/write of the server.
+- Remember where that vulnerability is and patch it up. I think it had something to do with not allowing path traversal in file names???
+
+Re-implement file size
+
+Display progress bar when uploading files
+
+Option to delete a folder or file when right clicking it
+
+Decide the destination on client-side in a way that interacting with the UI doesn't change the destination
+
+Protect the keyfile with a password
+

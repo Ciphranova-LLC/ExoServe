@@ -1,0 +1,140 @@
+
+/* Over rides */
+body {
+    background-color: #f1f1f1;
+}
+#file-preview {
+    touch-action: pan-y;
+}
+#collapse-thumb {
+  position: absolute;
+  left: 325px;
+  z-index: 10;
+
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+  border: 1px solid #ccc;
+  border-left: none;
+  background: #f1f1f1;
+  font-size: 14px;
+  line-height: 34px;
+  padding: 0;
+  text-align: center;
+  user-select: none;
+  flex-shrink: 0;
+}
+#collapse-thumb:hover {
+  background: #e2e2e2;
+}
+
+
+
+/* Layout */
+#layout {
+  display: flex;
+  position: relative;
+}
+
+
+
+/* Panels */
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+#file-explorer {
+  height: 97vh;
+  width: 325px;
+  min-width: 325px;
+  border-right: 1px solid #ccc;
+  overflow: hidden;
+}
+#file-explorer.collapsed {
+  width: 0;
+  min-width: 0px;
+}
+#file-explorer.collapsed + #collapse-thumb {
+  border-left: 1px solid #ccc;
+}
+.fill {
+  flex: 1;
+}
+
+
+
+/* Folder list */
+.panel-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-height: 0;
+}
+.list-group-item {
+    padding: 10px;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+
+
+/* Buttons */
+.button-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+}
+.button-row.border-top {
+  border-top: 1px solid #ccc;
+}
+button {
+  padding: 6px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+button.wide {
+  width: 75%;
+}
+button.success {
+  background: #198754;
+  color: white;
+  border: none;
+}
+
+
+
+/* Key Information */
+.key-info {
+    border-top: 1px solid #ccc;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+}
+#key-name {
+    margin: 0;
+}
+
+
+/* Preview */
+.preview {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  text-align: center;
+  overflow:hidden;
+}
+.preview > * {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  overflow: hidden;
+  word-break: break-word; /* allow long words/lines to wrap */
+  white-space: pre-wrap;  /* preserve line breaks but allow wrapping */
+  text-align: center;     /* keep centered text */
+}
