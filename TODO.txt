@@ -1,9 +1,5 @@
-MOST IMPORTANT:
-- I accidentally overwrote the current version with an old version
-- The current version allows arbitrary read/write of the server.
-- Remember where that vulnerability is and patch it up. I think it had something to do with not allowing path traversal in file names???
-
-Re-implement file size
+Re-implement file size in UI
+Re-implement sorting by file size or by name
 
 Display progress bar when uploading files
 

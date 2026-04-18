@@ -76,6 +76,9 @@ async function setSessionKey() {
             sessionStorage.setItem('key_uuid', uuid);
             sessionStorage.setItem('key_name', file.name);
 
+            // Import the key for encryption
+            importBase64Key(key);
+
             // Check for the loaded key, building the file tree
             checkForKey();
         }
