@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
-import ssl
 import os
-import io
-from flask import (
-    Flask, render_template, request, send_file, send_from_directory, session,
-    redirect, url_for, abort, jsonify, make_response
-)
-from werkzeug.utils import secure_filename
-from cryptography.fernet import Fernet
-from pathlib import Path
 import uuid
+from flask import (
+    Flask, jsonify, render_template, request, send_file,
+    send_from_directory, session,
+)
+from pathlib import Path
 
 
 # Ports to bind to for development server
@@ -17,18 +13,18 @@ IP_ADDRESS = '0.0.0.0'
 HTTPS_PORT = 8000
 
 # Local folders and files
-UPLOAD_FOLDER = 'uploads'
+HERE = Path(__file__).parent
+UPLOAD_FOLDER = HERE / 'uploads'
 
 # Create the Flask app
 app = Flask(__name__)
 app.secret_key = os.urandom(32)
 
 
-
 @app.before_request
 def setup_session():
     if 'current_path' not in session:
-        session['current_path'] = UPLOAD_FOLDER
+        session['current_path'] = str(UPLOAD_FOLDER)
 
 
 @app.route('/')
@@ -44,13 +40,14 @@ def serve_sw():
 @app.route('/set-uuid', methods=['POST'])
 def set_uuid():
     data = request.get_json()
-    key_uuid = data.get('uuid')
+    raw_uuid = data.get('uuid')
     try:
-        uuid.UUID(key_uuid)
-        session['key_uuid'] = key_uuid
-        Path(os.path.join(UPLOAD_FOLDER, key_uuid)).mkdir(parents=False, exist_ok=True)
+        clean_uuid = str(uuid.UUID(raw_uuid))
+        session['key_uuid'] = clean_uuid
+        Path(UPLOAD_FOLDER / clean_uuid).mkdir(parents=False, exist_ok=True)
         return '', 204
-    except:
+    except Exception as e:
+        print(e)
         return 'Invalid UUID', 400
 
 
@@ -71,7 +68,7 @@ def list_folder():
 
     # Craft and sanitize the full path
     key_uuid = session['key_uuid']
-    full_path = os.path.join(UPLOAD_FOLDER, key_uuid, rel_path, '')
+    full_path = UPLOAD_FOLDER / key_uuid / rel_path
 
     # Update current session path
     session['current_path'] = rel_path
@@ -79,27 +76,23 @@ def list_folder():
         rel_path = rel_path[1:]
 
     # Get files/folders for this UUID
-    records = os.listdir(full_path)
+    records = full_path.iterdir()
 
     # Decide between files and folders
     files = []
     folders = set()
-    prefix_len = len(full_path)
     for file_path in records:
-        full_file_path = os.path.join(full_path, file_path)
-
-        # if os.sep in file_path:
-        if os.path.isdir(full_file_path):
-            folders.add(file_path)
+        if file_path.is_dir():
+            folders.add(file_path.name)
         else:
-            files.append(file_path)
+            files.append(file_path.name)
 
     # Sort for UX
     files.sort()
     folders = sorted(list(folders))
 
     # If not at the root, add entry for "up"
-    if len(rel_path) > 0:
+    if rel_path:
         folders = ['..'] + folders
 
     # Update the file listing
@@ -114,13 +107,13 @@ def download_encrypted(filename):
 
     # Sanitize and construct path
     key_uuid = session['key_uuid']
-    full_path = os.path.join(UPLOAD_FOLDER, key_uuid, filename)
-    norm_path = os.path.normpath(full_path)
-    if not norm_path.startswith(os.path.join(UPLOAD_FOLDER, key_uuid)) or not os.path.isfile(norm_path):
-        return "Not found", 404
+    sandbox_path = UPLOAD_FOLDER / key_uuid
+    target_path = (sandbox_path / filename).resolve()
+    if not (target_path.is_relative_to(sandbox_path) and target_path.is_file()):
+        return 'Not found', 404
 
     # Return encrypted content (no decryption here!)
-    return send_file(full_path, as_attachment=False, conditional=True)
+    return send_file(target_path, as_attachment=False, conditional=True)
 
 
 @app.route('/upload_chunk', methods=['POST'])
@@ -131,7 +124,7 @@ def upload_chunk():
 
     # Get session and upload data
     key_uuid = session['key_uuid']
-    current_path = session.get('current_path', UPLOAD_FOLDER)
+    current_rel_path = session.get('current_path', UPLOAD_FOLDER)
 
     # Get file information
     file = request.files['file']
@@ -139,18 +132,18 @@ def upload_chunk():
     chunk_index = int(request.form['chunk_index'])
 
     # Craft and sanitize the path, checking for sandbox break
-    save_path = os.path.normpath(os.path.join(UPLOAD_FOLDER, key_uuid, current_path, filename))
-    print(save_path)
-    if not save_path.startswith(os.path.join(UPLOAD_FOLDER, key_uuid)):
+    sandbox_path = UPLOAD_FOLDER / key_uuid
+    target_path = (sandbox_path / current_rel_path / filename).resolve()
+    if not target_path.is_relative_to(sandbox_path):
         return "Invalid path", 403
     
     try:
         # Create directories if needed
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Write for new files, append for existing files
         mode = 'wb' if chunk_index == 0 else 'ab'
-        with open(save_path, mode) as f:
+        with target_path.open(mode) as f:
             f.write(file.read())
         
         # Finish
@@ -169,6 +162,6 @@ def run_http():
 
 # Run the HTTPS server
 if __name__ == '__main__':
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     run_http()
 
