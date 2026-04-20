@@ -1,0 +1,10 @@
+:root {
+    --bg-dark: #161616;
+    --bg-light: #222222;
+    --bg-light-hover: #303030;
+    --border-color: #282828;
+    --border-color-emph: #444444;
+    --fg: #f4f4f4;
+    --fg-subtle: #858585;
+    --transparent: #00000000;
+}

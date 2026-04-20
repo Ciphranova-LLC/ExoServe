@@ -198,7 +198,7 @@ async function downloadAndDecrypt(path) {
     // Spin until there is something to show
     showSpinner();
     let filename = escapeHtml(path.split('/').pop())
-    let html = `<h2>${filename}</h2><br/>`;
+    let html = `<h2>${filename}</h2>`;
 
     try {
         // Get the file extension
@@ -207,7 +207,7 @@ async function downloadAndDecrypt(path) {
         // Streaming from service worker for videos
         if(VIDEO_EXTENSIONS.includes(ext)) {
             const videoUrl = `/download/${encodeURIComponent(path)}`;
-            html += `<video id="preview-content" class="w-100" controls style="max-height:80vh;">
+            html += `<video id="preview-content" controls>
                     <source src="${videoUrl}" type="video/${ext}"></video>`;
         }
         
@@ -245,10 +245,10 @@ async function downloadAndDecrypt(path) {
                     html += `<pre style="white-space: pre-wrap;">${escapeHtml(text)}</pre>`;
             }
             else if(mimeType == 'application/pdf') {
-                html += `<iframe src="${currBlobUrl}" class="w-100" style="height: 80vh;" frameborder="0"></iframe>`;
+                html += `<iframe src="${currBlobUrl}"></iframe>`;
             }
             else {
-                html += `<img id="preview-content" src="${currBlobUrl}" class="img-fluid" onclick="goFullScreen(this)" style="max-height: 80vh; cursor: pointer">`;
+                html += `<img id="preview-content" src="${currBlobUrl}" onclick="goFullScreen(this)" style="cursor: pointer">`;
             }
         }
     }
@@ -261,6 +261,7 @@ async function downloadAndDecrypt(path) {
 
     // Display the preview
     document.getElementById('file-preview').innerHTML = html;
+    document.getElementById('preview-modal').showModal();
 }
 
 

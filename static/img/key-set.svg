@@ -1,0 +1,28 @@
+<svg width="120" height="120" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+    <g transform="rotate(45 60 60)">
+
+        <!-- Key head -->
+        <circle cx="40" cy="60" r="15"
+                fill="none"
+                stroke="#f4f4f4"
+                stroke-width="10"/>
+
+        <!-- Key shaft -->
+        <line x1="55" y1="60" x2="95" y2="60"
+              stroke="#f4f4f4"
+              stroke-width="10"
+              stroke-linecap="round"/>
+
+        <!-- Teeth -->
+        <line x1="80" y1="60" x2="80" y2="75"
+              stroke="#f4f4f4"
+              stroke-width="10"
+              stroke-linecap="round"/>
+
+        <line x1="92" y1="60" x2="92" y2="70"
+              stroke="#f4f4f4"
+              stroke-width="10"
+              stroke-linecap="round"/>
+
+        </g>
+    </svg>

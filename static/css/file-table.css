@@ -1,0 +1,100 @@
+.file-table {
+    height: 100%;
+
+    * {
+        user-select: none;
+    }
+
+    table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: small;
+        color: var(--fg-subtle);
+    }
+
+    thead > tr {
+        &:hover {
+            background-color: var(--transparent) !important;
+        }
+    }
+
+    tr {
+        text-align: left;
+
+        &:hover {
+            background-color: var(--border-color);
+        }
+    }
+
+    th {
+        padding: 8px;
+        cursor: pointer;
+        font-weight: normal;
+
+        &:hover {
+            background-color: var(--border-color);
+        }
+        & > img {
+            height: 16px;
+            vertical-align: middle;
+            padding-right: 6px;
+            filter: brightness(0) saturate(100%)
+                    invert(60%) sepia(1%) saturate(1539%)
+                    hue-rotate(28deg) brightness(88%) contrast(98%);
+        }
+    }
+
+    td {
+        padding: 8px;
+        border-bottom: 1px solid var(--bg-light);
+        margin: 0;
+        cursor: pointer;
+    }
+
+    .column-checkbox {
+        text-align: center;
+    }
+
+    .column-name {
+        color: var(--fg);
+        font-size: larger;
+    }
+
+    input[type=checkbox] {
+        -webkit-appearance: none;
+        appearance: none;
+        
+        width: 22px; 
+        height: 22px;
+        border-radius: 2px;
+        margin: 0;
+        
+        background-color: var(--bg-light);
+        border: 1px solid var(--fg);
+
+        cursor: pointer;
+        display: inline-grid;
+        place-content: center;
+
+        &::before {
+            content: "";
+            width: 14px;
+            height: 14px;
+            
+            background-image: url("../img/checkbox.svg");
+            background-size: contain;
+            background-position: center;
+            background-repeat: no-repeat;
+            
+            transform: scale(0);
+            transition: 120ms transform ease-in-out;
+        }
+
+        &:checked {
+            background-color: var(--fg);
+            &::before {
+                transform: scale(1);
+            }
+        }
+    }
+}

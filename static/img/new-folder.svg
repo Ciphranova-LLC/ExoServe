@@ -1,0 +1,26 @@
+<svg width="120" height="100" viewBox="0 0 130 100" xmlns="http://www.w3.org/2000/svg">
+    <!-- Folder outline -->
+    <path d="M10 30
+          L40 30
+          L50 20
+          L110 20
+          L110 95
+          L10 95
+          Z"
+          fill="none"
+          stroke="#f4f4f4"
+          stroke-width="8"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+
+    <!-- Plus sign -->
+    <line x1="60" y1="45" x2="60" y2="75"
+          stroke="#f4f4f4"
+          stroke-width="10"
+          stroke-linecap="round"/>
+
+    <line x1="45" y1="60" x2="75" y2="60"
+          stroke="#f4f4f4"
+          stroke-width="10"
+          stroke-linecap="round"/>
+    </svg>

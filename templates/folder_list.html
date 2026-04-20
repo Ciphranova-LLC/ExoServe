@@ -1,30 +1,106 @@
+<!-- Actual file table -->
+<table class="table sortable-table">
+    <thead>
+        <tr>
+            <th class="column-checkbox"><input class="checkbox-header" type="checkbox"></th>
+            <th id="header-name"> Name </th>
+            <th id="header-date">Date Added</th>
+            <th id="header-type">Type</th>
+            <th id="header-size">Size</th>
+        </tr>
+        <colgroup>
+            <col style="width: 5%;">
+            <col style="width: 55%;">
+            <col style="width: 20%;">
+            <col style="width: 10%;">
+            <col style="width: 10%;">
+        </colgroup>
+    </thead>
+    <tbody>
+        {% for folder in folders %}
+            <tr onclick="fetchFolder('{{ current_path }}/{{ folder.name | default(folder) }}')">
+                <td class="column-checkbox">
+                    <input class="checkbox-row" type="checkbox" onclick="event.stopPropagation()">
+                </td>
+                <td class="column-name type-folder" data-name="{{ folder.name | default(folder) }}">
+                    📁 {{ folder.name | default(folder) }}
+                </td>
+                <td class="date-cell" data-sort="{{ folder.date_added | default(0) }}"></td>
+                <td>Folder</td>
+                <td class="size-cell" data-sort="{{ folder.size | default(0) }}"></td> 
+            </tr>
+        {% endfor %}
+        
+        {% for file in files %}
+            <tr class="file-row" data-path="{{ current_path }}/{{ file.name | default(file) }}" onclick="setAndDownload(this)">
+                <td class="column-checkbox">
+                    <input class="checkbox-row" type="checkbox" onclick="event.stopPropagation()">
+                </td>
+                <td class="column-name type-file"> 📄 {{ file.name | default(file) }} </td>
+                <td class="date-cell" data-sort="{{ file.date_added | default(0) }}"></td>
+                <td>{{ file.type | default('File') }}</td>
+                <td class="size-cell" data-sort="{{ file.size | default(0) }}"></td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+
+<!-- Table sorter -->
 <script>
-  fileList = [
-    {% for file in files %}
-      "{{ current_path }}/{{ file }}"{% if not loop.last %},{% endif %}
-    {% endfor %}
-  ];
-  currentFileIndex = -1;
+    const getCellValue = (tr, idx) => {
+        const cell = tr.children[idx];
+        return cell.getAttribute('data-sort') || cell.innerText || cell.textContent;
+    };
+
+    const comparer = (idx, asc) => (a, b) => ((v1, v2) => 
+            v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2) ? v1 - v2 : v1.toString().localeCompare(v2)
+    )(getCellValue(asc ? a : b, idx), getCellValue(asc ? b : a, idx));
+
+    document.querySelectorAll('.sortable-table th').forEach(th => {
+        if(th.childElementCount == 0 || th.children[0].className != 'checkbox-header') {
+            th.addEventListener('click', function() {
+                const table = th.closest('table');
+                const tbody = table.querySelector('tbody');
+                Array.from(tbody.querySelectorAll('tr'))
+                        .sort(comparer(Array.from(th.parentNode.children).indexOf(th), this.asc = !this.asc))
+                        .forEach(tr => tbody.appendChild(tr));
+
+                const arrowPath = this.asc ? '../static/img/arrow-up.svg' : '../static/img/arrow-down.svg';
+                let sortImg = document.getElementById('sort-arrow');
+                if (!sortImg) {
+                    sortImg = document.createElement("img");
+                    sortImg.id = 'sort-arrow';
+                }
+                sortImg.src = arrowPath;
+                th.prepend(sortImg);
+            })
+        }
+    });
+    document.getElementById('header-name').click();
 </script>
 
+<!-- Checkbox handler -->
+<script>
+    const checkbox_header = document.querySelector('.checkbox-header');
+    const checkbox_rows = document.querySelectorAll('.checkbox-row');
 
-<ul class="list-group">
-  {% for folder in folders %}
-    <li class="list-group-item">
-      <a href="#" onclick="if(sessionStorage.getItem('key_name')) { 
-              fetchFolder('{{ current_path }}/{{ folder }}'); 
-           } else { 
-              alert('Set key first'); 
-           }">
-        📁 {{ folder }}
-      </a>
-    </li>
-  {% endfor %}
-  {% for file in files %}
-    <li class="list-group-item">
-      <a href="#" onclick="setAndDownload('{{ loop.index0 }}')">
-        📄 {{ file }}
-      </a>
-    </li>
-  {% endfor %}
-</ul>
+    if(checkbox_header) {
+
+        checkbox_header.addEventListener('change', function() {
+            checkbox_rows.forEach(checkbox =>
+                checkbox.checked = checkbox_header.checked
+            );
+        });
+
+        checkbox_rows.forEach(checkbox => {
+            checkbox.addEventListener('change', function() {
+                if(!checkbox.checked) {
+                    checkbox_header.checked = false;
+                } else {
+                    const allChecked = Array.from(checkbox_rows).every(cb => cb.checked);
+                    checkbox_header.checked = allChecked;
+                }
+            });
+        });
+    }
+</script>

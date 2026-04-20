@@ -1,40 +1,40 @@
-const details = document.getElementById('file-details');
-let fileList = [];
-let currentFileIndex = -1;
-
+const details = document.getElementById('preview-modal');
+let currentActiveRow = null;
 let touchStartX = 0;
 let touchEndX = 0;
 let isSingleTouch = false;
-let isFullscreen = false;
 const swipeThreshold = 50;
 
 
-function setAndDownload(index) {
-    currentFileIndex = parseInt(index);
-    downloadAndDecrypt(fileList[currentFileIndex]);
+function setAndDownload(rowNode) {
+    currentActiveRow = rowNode;
+    const filePath = rowNode.getAttribute('data-path');
+    downloadAndDecrypt(filePath);
 }
 
 
 function goToNextFile() {
-    if(currentFileIndex == fileList.length - 1)
-        currentFileIndex = 0;
-    else
-        currentFileIndex += 1;
-    downloadAndDecrypt(fileList[currentFileIndex]);
+    const allFileRows = Array.from(document.querySelectorAll('.file-row'));
+    const currentIndex = allFileRows.indexOf(currentActiveRow);
+    if(currentIndex === -1) return;
+    
+    let targetIndex = (currentIndex + 1) % allFileRows.length;
+    setAndDownload(allFileRows[targetIndex]);
 }
 
 
 function goToPreviousFile() {
-    if(currentFileIndex == 0)
-        currentFileIndex = fileList.length - 1;
-    else
-        currentFileIndex -= 1;
-    downloadAndDecrypt(fileList[currentFileIndex]);
+    const allFileRows = Array.from(document.querySelectorAll('.file-row'));
+    const currentIndex = allFileRows.indexOf(currentActiveRow);
+    if(currentIndex === -1) return;
+    
+    let targetIndex = (currentIndex - 1 + allFileRows.length) % allFileRows.length;
+    setAndDownload(allFileRows[targetIndex]);
 }
 
 
 function handleGesture() {
-    if (currentFileIndex === -1) return;
+    if(currentActiveRow === null) return;
 
     const deltaX = touchEndX - touchStartX;
 
@@ -51,7 +51,6 @@ function goFullScreen(elem) {
         elem.webkitRequestFullscreen();
     else if (elem.msRequestFullscreen)
         elem.msRequestFullscreen();
-    isFullscreen = true;
 }
 
 
@@ -70,7 +69,7 @@ details.addEventListener('touchend', function(e) {
 
 
 document.addEventListener('keydown', function(e) {
-    if(currentFileIndex === -1) return;
+    if(currentActiveRow === null) return;
     if(e.key === 'ArrowRight') goToNextFile();
     else if (e.key === 'ArrowLeft') goToPreviousFile();
 });
@@ -80,6 +79,10 @@ document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') {
         const preview = document.getElementById('file-preview');
         if(preview) preview.innerHTML = '<h2>Select a file to preview</h2>';
-        currentFileIndex = -1;
+        currentActiveRow = null;
     }
+});
+
+document.getElementById('preview-modal').addEventListener('close', function() {
+    document.getElementById('file-preview').innerHTML = '';
 });

@@ -7,22 +7,6 @@ async function sendKeyToServer(uuid) {
 }
 
 
-function fetchFolder(path) {
-    fetch(`/folder?path=${encodeURIComponent(path)}`)
-    .then(res => res.text())
-    .then(html => buildFileList(html));
-}
-
-
-function buildFileList(jinjaHtml) {
-    const folderListDiv = document.getElementById('folder-list');
-    folderListDiv.innerHTML = jinjaHtml;
-    folderListDiv.querySelectorAll('script').forEach(script => {
-        eval(script.textContent);
-    })
-}
-
-
 function generateAndDownloadKey() {
     // Generate 32-byte random key, base64 encoded
     const arr = new Uint8Array(32);
@@ -103,9 +87,8 @@ async function checkForKey() {
         let res = await sendKeyToServer(storedKeyUuid);
         if(res.ok) {
             keyNamePre.textContent = storedKeyUuid;
-            fetch("/folder")
-            .then(res => res.text())
-            .then(html => buildFileList(html));
+            clearBreadcrumbs();
+            fetchFolder('/')
         }
         else {
             keyNamePre.textContent = "No key set"
@@ -114,6 +97,8 @@ async function checkForKey() {
         keyNamePre.textContent = "No key set"
     }
 }
+
+
 document.addEventListener("DOMContentLoaded", async () => {
     await checkForKey();
 })

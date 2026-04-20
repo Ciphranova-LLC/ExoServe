@@ -1,0 +1,38 @@
+.sidebar-root {
+    width: 72px;
+    background-color: var(--bg-light);
+    margin-right: 20px;
+    align-items: center;
+    text-align: center;
+
+    & > :not(.button,hr) {
+        padding-top: 30px;
+        padding-bottom: 10px;
+    }
+
+    img {
+        width: 50%;
+    }
+
+    hr {
+        background-color: var(--fg);
+        width: 66%;
+        height: 0.5px;
+        padding: 0;
+        border: none;
+    }
+
+    .button {
+        border-radius: 0;
+        background-color: var(--bg-light);
+
+        img {
+            height: 100%;
+            width: 100%;
+        }
+
+        &:hover {
+            background-color: var(--bg-light-hover);
+        }
+    }
+}

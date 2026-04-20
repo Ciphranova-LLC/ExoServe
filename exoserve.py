@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import uuid
+from datetime import datetime
 from flask import (
     Flask, jsonify, render_template, request, send_file,
     send_from_directory, session,
@@ -80,21 +81,39 @@ def list_folder():
 
     # Decide between files and folders
     files = []
-    folders = set()
+    folders = []
     for file_path in records:
-        if file_path.is_dir():
-            folders.add(file_path.name)
+        file_stat = file_path.stat()
+
+        if file_path.is_file():
+            file_size = file_stat.st_size
+            file_type = file_path.suffix[1:].upper() + ' File'
+
+        elif file_path.is_dir():
+            file_size = sum(f.stat().st_size for f in file_path.rglob('*') if f.is_file())
+            file_type = "Folder"
+
         else:
-            files.append(file_path.name)
+            file_size = 0
+            file_type = '--'
 
-    # Sort for UX
-    files.sort()
-    folders = sorted(list(folders))
+        try:
+            file_time = file_stat.st_birthtime
+        except AttributeError:
+            file_time = file_stat.st_ctime
 
-    # If not at the root, add entry for "up"
-    if rel_path:
-        folders = ['..'] + folders
+        file_dict = {
+            'name': file_path.name,
+            'date_added': file_time,
+            'type': file_type,
+            'size': file_size,
+        }
 
+        if file_path.is_dir():
+            folders.append(file_dict)
+        else:
+            files.append(file_dict)
+        
     # Update the file listing
     return render_template('folder_list.html', folders=list(folders), files=files, current_path=rel_path)
 
