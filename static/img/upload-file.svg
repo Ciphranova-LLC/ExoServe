@@ -1,0 +1,41 @@
+<svg width="120" height="100" viewBox="0 0 130 100" xmlns="http://www.w3.org/2000/svg">
+    <!-- File outline -->
+    <path d="M30 10
+             L85 10
+             L105 30
+             L105 90
+             L30 90
+             Z"
+          fill="none"
+          stroke="#f4f4f4"
+          stroke-width="8"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+
+    <!-- Folded corner -->
+    <path d="M85 10
+             L85 30
+             L105 30"
+          fill="none"
+          stroke="#f4f4f4"
+          stroke-width="8"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+
+    <!-- Up arrow -->
+    <!-- Vertical line -->
+    <line x1="65" y1="70" x2="65" y2="40"
+          stroke="#f4f4f4"
+          stroke-width="5" />
+
+    <!-- Arrow head -->
+    <line x1="65" y1="40" x2="52" y2="55"
+          stroke="#f4f4f4"
+          stroke-width="5"
+          stroke-linecap="round"/>
+
+    <line x1="65" y1="40" x2="78" y2="55"
+          stroke="#f4f4f4"
+          stroke-width="5"
+          stroke-linecap="round"/>
+</svg>

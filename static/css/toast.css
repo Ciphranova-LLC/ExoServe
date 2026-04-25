@@ -1,0 +1,32 @@
+.toast-container {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 9999;
+    pointer-events: none;
+}
+
+.toast {
+    background-color: var(--bg-dark);
+    color: goldenrod;
+    border: 1px solid var(--highlight);
+    border-radius: 8px;
+    padding: 12px 24px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    font-size: 14px;
+    pointer-events: auto;
+
+    width: 320px;
+    
+    transform: translateY(100%);
+    opacity: 0;
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.toast.show {
+    transform: translateY(0);
+    opacity: 1;
+}

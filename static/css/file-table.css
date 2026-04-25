@@ -49,6 +49,13 @@
         border-bottom: 1px solid var(--bg-light);
         margin: 0;
         cursor: pointer;
+        vertical-align: middle;
+        img {
+            vertical-align: middle;
+            height: 20px;
+            margin-bottom: 4px;
+            margin-right: 4px;
+        }
     }
 
     .column-checkbox {

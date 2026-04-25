@@ -1,8 +1,7 @@
 {% extends "base.html" %}
 
-{% block title %}ExoServe{% endblock %}
-
 {% block content %}
+
 <!-- The main layout containing all elements-->
 <div class="layout-main">
 
@@ -12,11 +11,11 @@
 
         <hr/>
 
-        <div class="button" onclick="setSessionKey()" title="Set Key">
+        <div class="button" onclick="keyhandler_setSessionKey()" title="Set Key">
             <img src="static/img/key-set.svg"/>
         </div>
 
-        <div class="button" onclick="generateAndDownloadKey()" title="Generate Key">
+        <div class="button" onclick="keyhandler_generateAndDownloadKey()" title="Generate Key">
             <img src="static/img/key-new.svg"/>
         </div>
 
@@ -38,11 +37,25 @@
 
         <!-- Interaction buttons -->
         <div class="area-button">
-            <div class="button" onclick="uploadFile()" title="Upload">
-                <img src="static/img/arrow-up.svg"/>
-                Upload
+
+            <div class="dropdown-container" id="dropdown-upload">
+                <div class="button" onclick="ui_toggleDropdown('dropdown-upload')" title="Upload">
+                    <img src="static/img/arrow-up.svg"/>
+                    Upload
+                </div>
+                <div class="dropdown-menu">
+                    <div class="dropdown-item" onclick="ui_triggerFileUpload()">
+                        <img src="static/img/upload-file.svg"/>
+                        Upload File
+                    </div>
+                    <div class="dropdown-item" onclick="ui_triggerFolderUpload()">
+                        <img src="static/img/upload-folder.svg"/>
+                        Upload Folder
+                    </div>
+                </div>
             </div>
-            <div class="button" onclick="uploadFolder()" title="New folder">
+            
+            <div class="button" onclick="ui_showNewFolderModal()" title="New folder">
                 <img src="static/img/new-folder.svg"/>
                 New folder
             </div>
@@ -58,27 +71,42 @@
         <!-- Breadcrumb -->
         <div class="area-breadcrumb">
             <nav class="breadcrumbs">
-                <ol id="breadcrumb-list">
-                    <li class="crumb" data-path="/"><span>Home</span></li>
-                </ol>
+                <ol id="breadcrumb-list"></ol>
             </nav>
         </div>
 
         <!-- File table -->
         <div class="area-files">
-            <div id="folder-list" class="file-table"></div>
+            <div class="file-table">
+
+                <table class="table sortable-table">
+                    <thead>
+                        <tr>
+                            <th id="header-checkbox" class="column-checkbox">
+                                <input class="checkbox-header" type="checkbox">
+                            </th>
+                            <th id="header-name"> Name </th>
+                            <th id="header-date"> Date Added </th>
+                            <th id="header-type"> Type </th>
+                            <th id="header-size"> Size </th>
+                        </tr>
+                        <colgroup>
+                            <col style="width: 5%;">
+                            <col style="width: 55%;">
+                            <col style="width: 20%;">
+                            <col style="width: 10%;">
+                            <col style="width: 10%;">
+                        </colgroup>
+                    </thead>
+                    <tbody id="file-table-body">
+                    </tbody>
+                </table>
+
+            </div>
         </div>
     </main>
 
 </div>
-
-<!-- Preview dialog -->
- <dialog id="preview-modal" class="modal-root">
-    <form method="dialog" class="modal-header">
-        <button class="button-close" title="Close Preview">&#x26CC</button>
-    </form>
-    
-    <div id="file-preview" class="preview"></div>
-</dialog>
-
+{% include "modals/preview.html" %}
+{% include "modals/newfolder.html" %}
 {% endblock %}

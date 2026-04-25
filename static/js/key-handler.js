@@ -1,13 +1,14 @@
-async function sendKeyToServer(uuid) {
+async function keyhandler_sendKeyToServer(uuid) {
     return await fetch('/set-uuid', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uuid })
+        body: JSON.stringify({
+            uuid: uuid,
+        }),
     });
 }
 
-
-function generateAndDownloadKey() {
+function keyhandler_generateAndDownloadKey() {
     // Generate 32-byte random key, base64 encoded
     const arr = new Uint8Array(32);
     crypto.getRandomValues(arr);
@@ -27,26 +28,28 @@ function generateAndDownloadKey() {
     document.body.removeChild(link);
 }
 
-
-async function setSessionKey() {
+async function keyhandler_setSessionKey() {
     // Create a psuedo-element to select a file
     const input = document.createElement('input');
     input.type = 'file';
 
     // Define behvaior for when the selector changes
-    input.addEventListener('change', async function(event) {
+    input.addEventListener('change', async function (event) {
         // Validate a file was selected
         const file = event.target.files[0];
-        if(!file) return;
+        if (!file) return;
+
+        // Clear breadcrumbs
+        breadcrumbs_clear();
 
         try {
-            // Find the appropriate lines
+            // Find the appropriate lines in the file
             const text = await file.text();
             const lines = text.split('\n');
-            const keyLine = lines.find(l => l.startsWith('key:'));
-            const uuidLine = lines.find(l => l.startsWith('uuid:'));
-            if(!keyLine || !uuidLine) {
-                alert("Invalid key file format");
+            const keyLine = lines.find((l) => l.startsWith('key:'));
+            const uuidLine = lines.find((l) => l.startsWith('uuid:'));
+            if (!keyLine || !uuidLine) {
+                alert('Invalid key file format');
                 return;
             }
 
@@ -58,17 +61,15 @@ async function setSessionKey() {
             // Save the metadata in sessionStorage
             sessionStorage.setItem('fernet_key', key);
             sessionStorage.setItem('key_uuid', uuid);
-            sessionStorage.setItem('key_name', file.name);
 
             // Import the key for encryption
-            importBase64Key(key);
+            await e2ee_importBase64Key(key);
 
-            // Check for the loaded key, building the file tree
-            checkForKey();
-        }
-        catch(e) {
+            // Check for the loaded key
+            keyhandler_check();
+        } catch (e) {
             console.error(e);
-            alert("Failed to process key file");
+            alert('Failed to process key file');
         }
     });
 
@@ -76,29 +77,40 @@ async function setSessionKey() {
     input.click();
 }
 
+async function keyhandler_check() {
+    const keyNamePre = document.getElementById('key-name');
+    const storedKeyUuid = sessionStorage.getItem('key_uuid');
+    const storedKey = sessionStorage.getItem('fernet_key');
 
-async function checkForKey() {
-    const keyNamePre = document.getElementById("key-name");
-    const storedKeyName = sessionStorage.getItem("key_name");
-    const storedKeyUuid = sessionStorage.getItem("key_uuid");
-    const storedKey = sessionStorage.getItem("fernet_key");
+    if (storedKey && storedKeyUuid) {
+        let res = await keyhandler_sendKeyToServer(storedKeyUuid);
+        let rootHash = await res.text();
 
-    if(storedKey && storedKeyUuid && storedKeyName) {
-        let res = await sendKeyToServer(storedKeyUuid);
-        if(res.ok) {
+        if (res.ok) {
+            if (res.status == 204 || rootHash.trim() === '')
+                rootHash = await e2ee_newFolder((isRoot = true))['hash'];
             keyNamePre.textContent = storedKeyUuid;
-            clearBreadcrumbs();
-            fetchFolder('/')
-        }
-        else {
-            keyNamePre.textContent = "No key set"
+            filetable_goToFolder(rootHash, storedKey, 'Home');
+            return true;
+        } else {
+            keyNamePre.textContent = 'No key set';
         }
     } else {
-        keyNamePre.textContent = "No key set"
+        keyNamePre.textContent = 'No key set';
     }
+    return false;
 }
 
-
-document.addEventListener("DOMContentLoaded", async () => {
-    await checkForKey();
-})
+// Try to load the service worker before checking for a session key
+document.addEventListener('DOMContentLoaded', () => {
+    navigator.serviceWorker
+        .register('/sw.js')
+        .then(() => keyhandler_check())
+        .then((keyExists) => {
+            if (keyExists) {
+                const storedKeyUuid = sessionStorage.getItem('key_uuid');
+                ui_showToast(`Loaded ${storedKeyUuid}`);
+            }
+        })
+        .catch((err) => console.error('Service Worker Failed', err));
+});

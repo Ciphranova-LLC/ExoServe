@@ -1,0 +1,24 @@
+<svg width="120" height="100" viewBox="0 0 130 100" xmlns="http://www.w3.org/2000/svg">
+    <!-- File outline -->
+    <path d="M30 10
+             L85 10
+             L105 30
+             L105 90
+             L30 90
+             Z"
+          fill="lavender"
+          stroke="steelblue"
+          stroke-width="8"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+
+    <!-- Folded corner -->
+    <path d="M85 10
+             L85 30
+             L105 30"
+          fill="lavender"
+          stroke="steelblue"
+          stroke-width="8"
+          stroke-linejoin="round"
+          stroke-linecap="round"/>
+</svg>

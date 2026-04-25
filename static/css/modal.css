@@ -1,13 +1,10 @@
+/* Modal components */
 .modal-root {
-    width: 90vw;
-    max-height: 90vh;
-
     border-radius: 10px;
     border: 1px solid var(--border-color);
     background-color: var(--bg-dark);
     color: var(--fg);
     padding: 20px;
-    
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 
     &::backdrop {
@@ -15,13 +12,17 @@
         backdrop-filter: blur(4px);
     }
 
-    &:has(iframe) {
-        height: 90vh;
-    }
-
     &[open] {
         display: flex;
         flex-direction: column;
+    }
+
+    footer {
+        display: flex;
+        flex-direction: row;
+        justify-content: flex-end;
+        align-items: center;
+        gap: 10px;
     }
 }
 
@@ -34,24 +35,7 @@
     align-items: center;
 }
 
-.button-close {
-    background: none;
-    border: none;
-    color: var(--fg-subtle);
-    font-size: 28px;
-    line-height: 1;
-    cursor: pointer;
-
-    &:focus {
-        outline: none;
-    }
-
-    &:hover {
-        color: var(--fg);
-    }
-}
-
-.preview {
+.modal-body {
     flex: 1;
     min-height: 0;
     min-width: 0;
@@ -89,4 +73,44 @@
         text-align: left;
         margin: 0;
     }
+
+    input[type=text] {
+        width: 95%;
+        min-width: 100px;
+    }
+}
+
+/* Modal accessories */
+.button-close {
+    background: none;
+    border: none;
+    color: var(--fg-subtle);
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+
+    &:focus {
+        outline: none;
+    }
+
+    &:hover {
+        color: var(--fg);
+    }
+}
+
+
+/* Dimensional modals */
+.modal-xl {
+    width: 90vw;
+    max-height: 90vh;
+
+    &:has(iframe) {
+        height: 90vh;
+    }
+}
+
+.modal-sm {
+    width: 400px;
+    max-width: 90vw;
+    height: 200px;
 }

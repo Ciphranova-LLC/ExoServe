@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
+import hashlib
+import json
 import os
+import re
 import uuid
 from datetime import datetime
 from flask import (
@@ -7,6 +10,8 @@ from flask import (
     send_from_directory, session,
 )
 from pathlib import Path
+from src.filesystem import KVDatabase, new_file, read_file, delete_file, unstage_file
+from src.uploadstate import load_upload_state, save_upload_state
 
 
 # Ports to bind to for development server
@@ -16,6 +21,8 @@ HTTPS_PORT = 8000
 # Local folders and files
 HERE = Path(__file__).parent
 UPLOAD_FOLDER = HERE / 'uploads'
+STAGING_FOLDER = UPLOAD_FOLDER / 'staging'
+ROOT_DATABASE = KVDatabase(HERE / 'roots.db')
 
 # Create the Flask app
 app = Flask(__name__)
@@ -26,6 +33,7 @@ app.secret_key = os.urandom(32)
 def setup_session():
     if 'current_path' not in session:
         session['current_path'] = str(UPLOAD_FOLDER)
+        session['active_uploads'] = {}
 
 
 @app.route('/')
@@ -40,13 +48,35 @@ def serve_sw():
 
 @app.route('/set-uuid', methods=['POST'])
 def set_uuid():
+    # Get the UUID from the request
     data = request.get_json()
     raw_uuid = data.get('uuid')
     try:
+        # Validate and set the UUID for the session
         clean_uuid = str(uuid.UUID(raw_uuid))
         session['key_uuid'] = clean_uuid
-        Path(UPLOAD_FOLDER / clean_uuid).mkdir(parents=False, exist_ok=True)
-        return '', 204
+
+        # Define the sandbox directory
+        sandbox = UPLOAD_FOLDER / clean_uuid
+        sandbox.mkdir(parents=False, exist_ok=True)
+        session['sandbox'] = str(sandbox)
+
+        # Define the staging directory within the sandbox
+        staging = sandbox / 'staging'
+        staging.mkdir(parents=False, exist_ok=True)
+        session['staging'] = str(staging)
+        for item in staging.iterdir():
+            if item.is_file():
+                item.unlink()
+
+        # If there is no root node, ask the client to send one
+        root_node_hash = ROOT_DATABASE.get_value(clean_uuid)
+        if root_node_hash is None:
+            return '', 204
+        else:
+            return root_node_hash, 200
+
+    # Something went wrong (probably the UUID format)
     except Exception as e:
         print(e)
         return 'Invalid UUID', 400
@@ -69,7 +99,7 @@ def list_folder():
 
     # Craft and sanitize the full path
     key_uuid = session['key_uuid']
-    full_path = UPLOAD_FOLDER / key_uuid / rel_path
+    full_path = Path(session['sandbox']) / rel_path
 
     # Update current session path
     session['current_path'] = rel_path
@@ -118,60 +148,141 @@ def list_folder():
     return render_template('folder_list.html', folders=list(folders), files=files, current_path=rel_path)
 
 
-@app.route('/download/<path:filename>')
-def download_encrypted(filename):
+@app.route('/download/<checksum>')
+def route_download(checksum):
     # Validate a UUID is set
     if 'key_uuid' not in session:
         return '<h4>UUID not set</h4>', 403
+    sandbox = Path(session['sandbox'])
 
-    # Sanitize and construct path
-    key_uuid = session['key_uuid']
-    sandbox_path = UPLOAD_FOLDER / key_uuid
-    target_path = (sandbox_path / filename).resolve()
-    if not (target_path.is_relative_to(sandbox_path) and target_path.is_file()):
-        return 'Not found', 404
+    # Sanity check the checksum
+    pattern = re.compile(r'^[a-fA-F0-9]{64}$')
+    if not pattern.fullmatch(checksum):
+        return 'Invalid checksum', 403
 
-    # Return encrypted content (no decryption here!)
+    # Create the shard path
+    target_path = sandbox / checksum[0:2] / checksum[2:4] / checksum
+
+    # Return encrypted content
     return send_file(target_path, as_attachment=False, conditional=True)
 
 
 @app.route('/upload_chunk', methods=['POST'])
-def upload_chunk():
+def route_upload_chunk():
     # Validate a UUID is set
     if 'key_uuid' not in session:
         return '<h4>UUID not set</h4>', 403
 
-    # Get session and upload data
-    key_uuid = session['key_uuid']
-    current_rel_path = session.get('current_path', UPLOAD_FOLDER)
+    # Extract information from the request
+    file = request.files['chunk']
+    details = json.loads(request.form['details'])
 
-    # Get file information
-    file = request.files['file']
-    filename = request.form['filename']
-    chunk_index = int(request.form['chunk_index'])
+    # Build staging paths
+    realId = hashlib.sha256(details['id'].encode()).hexdigest()
+    staging_dir = Path(session['staging'])
+    staged_file = staging_dir / f'{realId}.part'
+    manifest = staging_dir / f"{realId}.json"
 
-    # Craft and sanitize the path, checking for sandbox break
-    sandbox_path = UPLOAD_FOLDER / key_uuid
-    target_path = (sandbox_path / current_rel_path / filename).resolve()
-    if not target_path.is_relative_to(sandbox_path):
-        return "Invalid path", 403
-    
-    try:
-        # Create directories if needed
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Write for new files, append for existing files
-        mode = 'wb' if chunk_index == 0 else 'ab'
-        with target_path.open(mode) as f:
-            f.write(file.read())
-        
-        # Finish
+    # Load and sanity check the current upload state
+    state = load_upload_state(manifest)
+    if details['chunk_index'] != state['index']:
+        return 'Received chunks out of order', 403
+
+    # Append new data onto the target
+    chunk_data = file.read()
+    with staged_file.open('ab') as f:
+        f.write(chunk_data)
+
+    # Update the upload state tracking
+    chunk_hash_hex = hashlib.sha256(chunk_data).hexdigest()
+    state['hashes'].append(chunk_hash_hex)
+    state['index'] += 1
+    save_upload_state(manifest, state)
+
+    # If this is the final chunk...
+    if 'checksum' in details:
+        # Calculate the hash-of-hashes
+        combined_hashes = b''.join(bytes.fromhex(h) for h in state['hashes'])
+        computed = hashlib.sha256(combined_hashes).hexdigest()
+
+        # Validate the integrity
+        if computed != details['checksum']:
+            staged_file.unlink(missing_ok=True)
+            manifest.unlink(missing_ok=True)
+            return 'Checksum fail', 403
+
+        # Move the file from staging and cleanup
+        sandbox = Path(session['sandbox'])
+        manifest.unlink(missing_ok=True)
+        unstage_file(sandbox, staged_file, computed)
         return jsonify({"status": "success"}), 200
 
-    except Exception as e:
-        # Something went wrong, return the exception
-        print(f"Chunk upload error: {e}")
-        return jsonify({"error": str(e)}), 500
+    # Assure the client that the file is still staged
+    return jsonify({"status": "pending"}), 200
+
+
+@app.route('/node', methods=['POST'])
+def route_post_node():
+    # Validate a UUID is set
+    if 'key_uuid' not in session:
+        return '<h4>UUID not set</h4>', 403
+    key_uuid = session['key_uuid']
+    sandbox = Path(session['sandbox'])
+
+    # Extract the request details
+    details = json.loads(request.form['details'])
+
+    # Validate the checksum
+    blob = request.files['blob'].read()
+    checksum = details['checksum']
+    shasum = hashlib.sha256(blob).hexdigest()
+    assert checksum == shasum, "Integrity check fail"
+
+    # Create the new node, with special hanlding for the root node
+    if 'root' in details and details['root']:
+        ROOT_DATABASE.upsert_value(key_uuid, checksum)
+    new_file(sandbox, checksum, blob)
+
+    # Delete the stale node if it exists
+    if 'stale' in details:
+        delete_file(sandbox, details['stale'])
+
+    return '', 204
+
+
+@app.route('/node/<checksum>', methods=['GET'])
+def route_get_node(checksum):
+    # Validate a UUID is set
+    if 'key_uuid' not in session:
+        return '<h4>UUID not set</h4>', 403
+    key_uuid = session['key_uuid']
+    sandbox = Path(session['sandbox'])
+
+    # Determine which checksum to load
+    if checksum == 'root':
+        actual_checksum = ROOT_DATABASE.get_value(key_uuid)
+    else:
+        actual_checksum = checksum
+        
+    blob = read_file(sandbox, actual_checksum)
+    return blob, 200
+
+
+@app.route('/node/<checksum>', methods=['DELETE'])
+def route_delete_node(checksum):
+    # Validate a UUID is set
+    if 'key_uuid' not in session:
+        return '<h4>UUID not set</h4>', 403
+    sandbox = Path(session['sandbox'])
+
+    # Determine which checksum to delete
+    if checksum == 'root':
+        return '', 403
+    else:
+        actual_checksum = checksum
+    
+    delete_file(sandbox, actual_checksum)
+    return '', 204
 
 
 # Start the HTTP development server
@@ -183,4 +294,3 @@ def run_http():
 if __name__ == '__main__':
     UPLOAD_FOLDER.mkdir(parents=True, exist_ok=True)
     run_http()
-

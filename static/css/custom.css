@@ -40,7 +40,7 @@ vr {
     justify-content: space-between;
     padding-right:20px;
 }
-.area-search input[type=text] {
+input[type=text] {
     height: 40px;
     border-radius: 5px;
     border-color: var(--border-color-emph);
@@ -51,7 +51,7 @@ vr {
     width: 50%;
     min-width: 305px;
 }
-.area-search input:focus{
+input:focus{
     outline: none;
 }
 .area-search pre {
@@ -143,6 +143,7 @@ vr {
     align-items: center;
     border-radius: 10px;
     cursor: pointer;
+    user-select: none;
     gap: 5px;
 }
 .button img {
