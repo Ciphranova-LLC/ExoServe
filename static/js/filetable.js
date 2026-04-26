@@ -5,14 +5,24 @@ const filetable_getCellValue = (tr, idx) => {
     const cell = tr.children[idx];
     return cell.getAttribute('data-sort') || cell.innerText || cell.textContent;
 };
-const filetable_comparer = (idx, asc) => (a, b) =>
-    ((v1, v2) =>
-        v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2)
-            ? v1 - v2
-            : v1.toString().localeCompare(v2))(
-        filetable_getCellValue(asc ? a : b, idx),
-        filetable_getCellValue(asc ? b : a, idx)
-    );
+const filetable_comparer = (idx, asc) => (a, b) => {
+    // Sort folders above files
+    const aIsFolder = a.classList.contains('folder-row');
+    const bIsFolder = b.classList.contains('folder-row');
+    if (aIsFolder && !bIsFolder) return -1;
+    if (!aIsFolder && bIsFolder) return 1;
+
+    // Sort within folder/file groupings
+    const v1 = filetable_getCellValue(a, idx);
+    const v2 = filetable_getCellValue(b, idx);
+    let result;
+    if (v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2)) {
+        result = v1 - v2;
+    } else {
+        result = v1.toString().localeCompare(v2);
+    }
+    return asc ? result : -result;
+};
 
 function filtable_formatBytes(bytes) {
     if (bytes === -1 || bytes === '--' || bytes == null) return '--';
