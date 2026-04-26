@@ -88,7 +88,7 @@ async function keyhandler_check() {
 
         if (res.ok) {
             if (res.status == 204 || rootHash.trim() === '')
-                rootHash = await e2ee_newFolder((isRoot = true))['hash'];
+                rootHash = (await e2ee_newFolder((isRoot = true)))['hash'];
             keyNamePre.textContent = storedKeyUuid;
             filetable_goToFolder(rootHash, storedKey, 'Home');
             return true;
