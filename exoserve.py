@@ -29,13 +29,6 @@ app = Flask(__name__)
 app.secret_key = os.urandom(32)
 
 
-@app.before_request
-def setup_session():
-    if 'current_path' not in session:
-        session['current_path'] = str(UPLOAD_FOLDER)
-        session['active_uploads'] = {}
-
-
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -82,125 +75,52 @@ def set_uuid():
         return 'Invalid UUID', 400
 
 
-@app.route('/folder', methods=['GET'])
-def list_folder():
-    # Validate the presence of a UUID
-    if 'key_uuid' not in session:
-        return '<h4>UUID not set</h4>', 403
-
-    # Get the relative path from the UUID root
-    rel_path = request.args.get('path', '')
-    if len(rel_path) > 0 and rel_path[0] == os.path.sep:
-        rel_path = rel_path[1:]
-
-    # Handle "up" with sanity checking for sandbox breaking
-    if rel_path.endswith('..') and rel_path != '..':
-        rel_path = os.sep.join(rel_path.split(os.sep)[:-2])
-
-    # Craft and sanitize the full path
-    key_uuid = session['key_uuid']
-    full_path = Path(session['sandbox']) / rel_path
-
-    # Update current session path
-    session['current_path'] = rel_path
-    if len(rel_path) > 0 and rel_path[0] == os.path.sep:
-        rel_path = rel_path[1:]
-
-    # Get files/folders for this UUID
-    records = full_path.iterdir()
-
-    # Decide between files and folders
-    files = []
-    folders = []
-    for file_path in records:
-        file_stat = file_path.stat()
-
-        if file_path.is_file():
-            file_size = file_stat.st_size
-            file_type = file_path.suffix[1:].upper() + ' File'
-
-        elif file_path.is_dir():
-            file_size = sum(f.stat().st_size for f in file_path.rglob('*') if f.is_file())
-            file_type = "Folder"
-
-        else:
-            file_size = 0
-            file_type = '--'
-
-        try:
-            file_time = file_stat.st_birthtime
-        except AttributeError:
-            file_time = file_stat.st_ctime
-
-        file_dict = {
-            'name': file_path.name,
-            'date_added': file_time,
-            'type': file_type,
-            'size': file_size,
-        }
-
-        if file_path.is_dir():
-            folders.append(file_dict)
-        else:
-            files.append(file_dict)
-        
-    # Update the file listing
-    return render_template('folder_list.html', folders=list(folders), files=files, current_path=rel_path)
-
-
-@app.route('/download/<checksum>')
-def route_download(checksum):
+@app.route('/node', methods=['POST'])
+def route_post_node():
     # Validate a UUID is set
     if 'key_uuid' not in session:
         return '<h4>UUID not set</h4>', 403
+
+    key_uuid = session['key_uuid']
     sandbox = Path(session['sandbox'])
 
-    # Sanity check the checksum
-    pattern = re.compile(r'^[a-fA-F0-9]{64}$')
-    if not pattern.fullmatch(checksum):
-        return 'Invalid checksum', 403
-
-    # Create the shard path
-    target_path = sandbox / checksum[0:2] / checksum[2:4] / checksum
-
-    # Return encrypted content
-    return send_file(target_path, as_attachment=False, conditional=True)
-
-
-@app.route('/upload_chunk', methods=['POST'])
-def route_upload_chunk():
-    # Validate a UUID is set
-    if 'key_uuid' not in session:
-        return '<h4>UUID not set</h4>', 403
-
-    # Extract information from the request
-    file = request.files['chunk']
+    # Extract the request details and file payload
     details = json.loads(request.form['details'])
+    file_obj = request.files.get('blob') or request.files.get('chunk')
+    if not file_obj:
+        return 'No file payload provided', 400
+    payload_data = file_obj.read()
 
-    # Build staging paths
-    realId = hashlib.sha256(details['id'].encode()).hexdigest()
-    staging_dir = Path(session['staging'])
-    staged_file = staging_dir / f'{realId}.part'
-    manifest = staging_dir / f"{realId}.json"
+    # Determine if this is a chunked upload or a single-shot upload
+    is_chunked = 'chunk_index' in details and 'id' in details
+    final_checksum = None
 
-    # Load and sanity check the current upload state
-    state = load_upload_state(manifest)
-    if details['chunk_index'] != state['index']:
-        return 'Received chunks out of order', 403
+    if is_chunked:
+        # Extract chunk info
+        realId = hashlib.sha256(details['id'].encode()).hexdigest()
+        staging_dir = Path(session['staging'])
+        staged_file = staging_dir / f'{realId}.part'
+        manifest = staging_dir / f"{realId}.json"
 
-    # Append new data onto the target
-    chunk_data = file.read()
-    with staged_file.open('ab') as f:
-        f.write(chunk_data)
+        # Load and sanity check the current upload state
+        state = load_upload_state(manifest)
+        if details['chunk_index'] != state['index']:
+            return 'Received chunks out of order', 403
 
-    # Update the upload state tracking
-    chunk_hash_hex = hashlib.sha256(chunk_data).hexdigest()
-    state['hashes'].append(chunk_hash_hex)
-    state['index'] += 1
-    save_upload_state(manifest, state)
+        # Append new data onto the target
+        with staged_file.open('ab') as f:
+            f.write(payload_data)
 
-    # If this is the final chunk...
-    if 'checksum' in details:
+        # Update the upload state tracking
+        chunk_hash_hex = hashlib.sha256(payload_data).hexdigest()
+        state['hashes'].append(chunk_hash_hex)
+        state['index'] += 1
+        save_upload_state(manifest, state)
+
+        # If this is not the final chunk, return early
+        if 'checksum' not in details:
+            return jsonify({"status": "pending"}), 200
+
         # Calculate the hash-of-hashes
         combined_hashes = b''.join(bytes.fromhex(h) for h in state['hashes'])
         computed = hashlib.sha256(combined_hashes).hexdigest()
@@ -211,43 +131,35 @@ def route_upload_chunk():
             manifest.unlink(missing_ok=True)
             return 'Checksum fail', 403
 
-        # Move the file from staging and cleanup
-        sandbox = Path(session['sandbox'])
+        # Move the file from staging into the sandbox
         manifest.unlink(missing_ok=True)
         unstage_file(sandbox, staged_file, computed)
-        return jsonify({"status": "success"}), 200
+        final_checksum = computed
 
-    # Assure the client that the file is still staged
-    return jsonify({"status": "pending"}), 200
+    else:
+        # Uploading a whole file
+        if 'checksum' not in details:
+            return 'Missing checksum', 400
 
+        final_checksum = details['checksum']
+        shasum = hashlib.sha256(payload_data).hexdigest()
 
-@app.route('/node', methods=['POST'])
-def route_post_node():
-    # Validate a UUID is set
-    if 'key_uuid' not in session:
-        return '<h4>UUID not set</h4>', 403
-    key_uuid = session['key_uuid']
-    sandbox = Path(session['sandbox'])
+        # Using a standard return instead of assert to prevent 500 errors
+        if final_checksum != shasum:
+            return "Integrity check fail", 403
 
-    # Extract the request details
-    details = json.loads(request.form['details'])
+        new_file(sandbox, final_checksum, payload_data)
 
-    # Validate the checksum
-    blob = request.files['blob'].read()
-    checksum = details['checksum']
-    shasum = hashlib.sha256(blob).hexdigest()
-    assert checksum == shasum, "Integrity check fail"
-
-    # Create the new node, with special hanlding for the root node
-    if 'root' in details and details['root']:
-        ROOT_DATABASE.upsert_value(key_uuid, checksum)
-    new_file(sandbox, checksum, blob)
+    # The full node (single or chunked) is safely in the sandbox
+    # Create the new node, with special handling for the root node
+    if details.get('root'):
+        ROOT_DATABASE.upsert_value(key_uuid, final_checksum)
 
     # Delete the stale node if it exists
     if 'stale' in details:
         delete_file(sandbox, details['stale'])
 
-    return '', 204
+    return jsonify({"status": "success"}), 200
 
 
 @app.route('/node/<checksum>', methods=['GET'])
@@ -263,9 +175,12 @@ def route_get_node(checksum):
         actual_checksum = ROOT_DATABASE.get_value(key_uuid)
     else:
         actual_checksum = checksum
-        
-    blob = read_file(sandbox, actual_checksum)
-    return blob, 200
+
+    # Create the shard path
+    target_path = sandbox / checksum[0:2] / checksum[2:4] / checksum
+
+    # Return encrypted content
+    return send_file(target_path, as_attachment=False, conditional=True)
 
 
 @app.route('/node/<checksum>', methods=['DELETE'])
@@ -280,7 +195,7 @@ def route_delete_node(checksum):
         return '', 403
     else:
         actual_checksum = checksum
-    
+
     delete_file(sandbox, actual_checksum)
     return '', 204
 

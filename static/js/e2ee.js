@@ -222,7 +222,7 @@ async function e2ee_uploadFileChunked(file) {
         formData.append('details', details);
 
         // Perform the upload
-        const res = await fetch('/upload_chunk', {
+        const res = await fetch('/node', {
             method: 'POST',
             body: formData,
         });
@@ -505,7 +505,7 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
 
         // Streaming from service worker for videos
         if (VIDEO_EXTENSIONS.includes(ext)) {
-            const videoUrl = `/download/${hash}?ext=${ext}`;
+            const videoUrl = `/node/${hash}?ext=${ext}`;
             html += `<video id="preview-content" controls>
                     <source src="${videoUrl}" type="video/${ext}"></video>`;
         }
@@ -513,7 +513,7 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
         // Whole-file from service worker for everything else
         else {
             // Download
-            const res = await fetch(`/download/${hash}`);
+            const res = await fetch(`/node/${hash}`);
             if (!res.ok) {
                 const errorBody = await res.text();
                 throw new Error(errorBody || `HTTP Error ${res.status}: Download failed`);

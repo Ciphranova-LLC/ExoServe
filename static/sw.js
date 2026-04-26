@@ -75,10 +75,8 @@ self.addEventListener('fetch', event => {
     }
 
     // The File Routes
-    if (url.pathname.includes('/download/') && event.request.method === 'GET') {
+    if(url.pathname.includes('/node') && event.request.method === 'GET') {
         event.respondWith(handleDecryption(event.request, event.clientId));
-    } else if(url.pathname.includes('/node') && event.request.method === 'GET') {
-        event.respondWith(decryptWhole(event.request, event.clientId));
     }
 });
 
