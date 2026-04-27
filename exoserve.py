@@ -177,7 +177,7 @@ def route_get_node(checksum):
         actual_checksum = checksum
 
     # Create the shard path
-    target_path = sandbox / checksum[0:2] / checksum[2:4] / checksum
+    target_path = sandbox / actual_checksum[0:2] / actual_checksum[2:4] / actual_checksum
 
     # Return encrypted content
     return send_file(target_path, as_attachment=False, conditional=True)
