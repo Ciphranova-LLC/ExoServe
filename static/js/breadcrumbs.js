@@ -34,7 +34,7 @@ function breadcrumbs_append(folderHash, folderKey, folderName) {
 function breadcrumbs_clear() {
     const head = document.querySelector('.crumb:first-child');
     if (head) {
-        let currNode = head.nextElementSibling;
+        let currNode = head;
         while (currNode) {
             let nextNode = currNode.nextElementSibling;
             currNode.remove();
