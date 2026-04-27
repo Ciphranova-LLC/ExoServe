@@ -596,8 +596,14 @@ async function e2ee_walkMerkleTree(crumbs, newChildName, newChildMetadata, hasLo
             // Upper directories: Update only the hash pointer to the folder below it
             else {
                 parent['children'][currChildName]['hash'] = currChildMetadata['hash'];
+                parent['children'][currChildName]['size'] = currChildMetadata['size'];
             }
-            // TODO: update parent['children'][currentChildName]['size'] above for dynamic folder sizes
+
+            // Update the size of the parent
+            let currentFolderSize = 0;
+            for (const key in parent['children']) {
+                currentFolderSize += parent['children'][key]['size'] || 0;
+            }
 
             // Re-encrypt and re-hash the parent
             const combinedData = await e2ee_encryptWhole(JSON.stringify(parent), parentKeyBase64);
@@ -628,7 +634,10 @@ async function e2ee_walkMerkleTree(crumbs, newChildName, newChildMetadata, hasLo
 
             // Shift the scope to the next breadcrumb
             currChildName = crumb.getAttribute('data-name') || crumb.textContent.trim();
-            currChildMetadata = { hash: newParentHash };
+            currChildMetadata = {
+                hash: newParentHash,
+                size: currentFolderSize,
+            };
         }
     } finally {
         if (!hasLock) treeLock.release();
