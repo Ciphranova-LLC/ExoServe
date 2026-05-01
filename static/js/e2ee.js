@@ -581,19 +581,23 @@ async function e2ee_walkMerkleTree(crumbs, newChildName, newChildMetadata, hasLo
             // Fetch the parent folder
             const parent = await e2ee_fetchFolder(parentHash, parentKeyBase64);
 
-            // For the active directory, handle overwrites
+            // For the active directory, handle overwrites or deletions
             if (i === crumbs.length - 1 && currChildName in parent['children']) {
                 const oldChild = parent['children'][currChildName];
-                if (oldChild['hash'] !== currChildMetadata['hash']) {
+                if (!currChildMetadata || oldChild['hash'] !== currChildMetadata['hash']) {
                     await e2ee_deleteNode(oldChild['hash'], oldChild['type'], oldChild['key']);
                 }
             }
 
-            // Active directory: Insert the full metadata for the new/modified file
+            // Active directory: Insert the new metadata or delete the existing key
             if (i === crumbs.length - 1) {
-                parent['children'][currChildName] = currChildMetadata;
+                if (!currChildMetadata) {
+                    delete parent['children'][currChildName];
+                } else {
+                    parent['children'][currChildName] = currChildMetadata;
+                }
             }
-            // Upper directories: Update only the hash pointer to the folder below it
+            // Upper directories: Update only the hash pointer and size to the folder below it
             else {
                 parent['children'][currChildName]['hash'] = currChildMetadata['hash'];
                 parent['children'][currChildName]['size'] = currChildMetadata['size'];

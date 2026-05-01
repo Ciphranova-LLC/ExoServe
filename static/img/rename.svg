@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
+    <!-- Line -->
+    <line x1="10" y1="22" x2="23" y2="22"
+        stroke="#f4f4f4"
+        stroke-width="2"
+        stroke-linecap="round"/>
+
+    <!-- Pencil -->
+    <path d="M5 21l4-1 10-10-3-3L6 17l-1 4z"
+        stroke="#f4f4f4"
+        stroke-width="2"
+        stroke-linecap="round"/>
+</svg>

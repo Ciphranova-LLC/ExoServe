@@ -1,3 +1,60 @@
+let activeContextNode = null;
+
+function ui_initContextMenu() {
+    const contextMenu = document.getElementById('context-menu');
+    const tbody = document.getElementById('file-table-body');
+    tbody.addEventListener('contextmenu', (event) => {
+        // Find the closest table row that was clicked
+        const row = event.target.closest('tr');
+        if (
+            !row ||
+            (!row.classList.contains('folder-row') && !row.classList.contains('file-row'))
+        ) {
+            return;
+        }
+
+        // Prevent the default right-click menu
+        event.preventDefault();
+
+        // Save the metadata of the clicked row
+        activeContextNode = {
+            hash: row.getAttribute('data-hash'),
+            key: row.getAttribute('data-key'),
+            name: row.getAttribute('data-name'),
+            type: row.classList.contains('folder-row') ? 'folder' : 'file',
+        };
+
+        // Calculate Position (with edge detection)
+        let x = event.clientX;
+        let y = event.clientY;
+
+        // Prevent the menu from bleeding off the bottom or right of the screen
+        const menuWidth = contextMenu.offsetWidth || 160;
+        const menuHeight = contextMenu.offsetHeight || 130;
+        if (x + menuWidth > window.innerWidth) x -= menuWidth;
+        if (y + menuHeight > window.innerHeight) y -= menuHeight;
+
+        // Apply position and activate
+        contextMenu.style.left = `${x}px`;
+        contextMenu.style.top = `${y}px`;
+        contextMenu.classList.add('active');
+    });
+
+    // Close the menu when clicking
+    document.addEventListener('click', (event) => {
+        contextMenu.classList.remove('active');
+    });
+
+    // Close the menu when pressing escape
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            contextMenu.classList.remove('active');
+        }
+    });
+}
+
+/******************************/
+
 function ui_showNewFolderModal() {
     if (!sessionStorage.getItem('key_uuid')) {
         ui_showToast('Key not set');
@@ -24,6 +81,41 @@ function ui_submitNewFolderModal() {
 
     e2ee_newFolder((isRoot = false), (folderName = chosenName), crumbs).then((_) => dialog.close());
 }
+
+/******************************/
+
+function ui_showYesNoModal(question) {
+    if (!sessionStorage.getItem('key_uuid')) {
+        ui_showToast('Key not set');
+        return;
+    }
+    const dialog = document.getElementById('modal-yesno');
+    document.getElementById('yesno-question').innerHTML = question + activeContextNode.name + '?';
+    dialog.showModal();
+}
+
+function ui_closeYesNoModal() {
+    const dialog = document.getElementById('modal-yesno');
+    dialog.close();
+}
+
+function ui_submitDelete() {
+    const dialog = document.getElementById('modal-yesno');
+    const crumbs = Array.from(document.querySelectorAll('.crumb'));
+
+    e2ee_walkMerkleTree(crumbs, activeContextNode.name, null)
+        .then((_) => {
+            dialog.close();
+            __e2ee_refreshTableView(crumbs);
+            ui_showToast(`Deleted ${activeContextNode.name}`);
+        })
+        .catch((err) => {
+            console.error('Failed to delete node:', err);
+            ui_showToast(`Failed to delete ${activeContextNode.name}`);
+        });
+}
+
+/******************************/
 
 function ui_showToast(message, durationMs = 3000) {
     const container = document.getElementById('toast-container');
@@ -112,10 +204,14 @@ function ui_createProgressToast(filename) {
     };
 }
 
+/******************************/
+
 function ui_toggleDropdown(elemId) {
     const container = document.getElementById(elemId);
     container.classList.toggle('active');
 }
+
+/******************************/
 
 function ui_triggerFileUpload() {
     if (!sessionStorage.getItem('key_uuid')) {
@@ -136,6 +232,8 @@ function ui_triggerFolderUpload() {
     ui_toggleDropdown('dropdown-upload');
     e2ee_uploadFolder(crumbs);
 }
+
+/******************************/
 
 document.addEventListener('click', (event) => {
     const activeDropdowns = document.querySelectorAll('.dropdown-container.active');
@@ -164,4 +262,6 @@ document.addEventListener('DOMContentLoaded', () => {
             ui_submitNewFolderModal();
         }
     });
+
+    ui_initContextMenu();
 });

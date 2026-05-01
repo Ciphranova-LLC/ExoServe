@@ -80,6 +80,11 @@
     }
 }
 
+.modal-center-footer footer {
+    justify-content: center;
+    gap: 20px;
+}
+
 /* Modal accessories */
 .button-close {
     background: none;
