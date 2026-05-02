@@ -147,6 +147,7 @@ function ui_showRenameNodeModal() {
     const dialog = document.getElementById('modal-renamenode');
     const input = document.getElementById('renamenode-name');
     document.getElementById('renamenode-prompt').innerHTML = `Rename "${activeContextNode.name}"`;
+    input.value = activeContextNode.name;
     dialog.showModal();
     input.focus();
 }

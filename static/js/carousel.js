@@ -69,6 +69,7 @@ details.addEventListener(
 
 details.addEventListener('close', function () {
     document.getElementById('file-preview').innerHTML = '';
+    currentActiveRow = null;
 });
 
 document.addEventListener('keydown', function (e) {
