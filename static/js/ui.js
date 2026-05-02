@@ -117,6 +117,83 @@ function ui_submitDelete() {
 
 /******************************/
 
+function ui_initRenameNodeModal() {
+    const input = document.getElementById('renamenode-name');
+
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            ui_submitRenameNodeModal();
+        }
+    });
+}
+
+function ui_showRenameNodeModal() {
+    if (!sessionStorage.getItem('key_uuid')) {
+        ui_showToast('Key not set');
+        return;
+    }
+    const dialog = document.getElementById('modal-renamenode');
+    const input = document.getElementById('renamenode-name');
+    document.getElementById('renamenode-prompt').innerHTML = `Rename "${activeContextNode.name}"`;
+    dialog.showModal();
+    input.focus();
+}
+
+function ui_closeRenameNodeModal() {
+    const dialog = document.getElementById('modal-renamenode');
+    dialog.close();
+}
+
+function ui_submitRenameNodeModal() {
+    const dialog = document.getElementById('modal-renamenode');
+    const input = document.getElementById('renamenode-name');
+    const newName = input.value.trim();
+    const oldName = activeContextNode.name;
+
+    if (!newName || newName === oldName) {
+        input.value = '';
+        dialog.close();
+        return;
+    }
+
+    const crumbs = Array.from(document.querySelectorAll('.crumb'));
+    const parentCrumb = crumbs[crumbs.length - 1];
+
+    e2ee_fetchFolder(parentCrumb.getAttribute('data-hash'), parentCrumb.getAttribute('data-key'))
+        .then((parentFolder) => {
+            // Ensure the item exists and the new name won't overwrite something else
+            if (!(oldName in parentFolder.children)) {
+                throw new Error('Item not found in directory.');
+            }
+            if (newName in parentFolder.children) {
+                throw new Error('Name collision.');
+            }
+
+            // Extract the metadata
+            const itemMetadata = parentFolder.children[oldName];
+
+            // Update the merkle tree
+            return e2ee_walkMerkleTree(crumbs, newName, itemMetadata, false, oldName);
+        })
+        .then(() => {
+            input.value = '';
+            dialog.close();
+            __e2ee_refreshTableView(crumbs);
+            ui_showToast(`Renamed to "${newName}"`);
+        })
+        .catch((err) => {
+            console.error('Failed to rename node:', err);
+            if (err.message === 'Name collision.') {
+                alert('A file or folder with that name already exists');
+            } else {
+                ui_showToast(`Failed to rename ${oldName}`);
+            }
+        });
+}
+
+/******************************/
+
 function ui_showToast(message, durationMs = 3000) {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -264,4 +341,5 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     ui_initContextMenu();
+    ui_initRenameNodeModal();
 });

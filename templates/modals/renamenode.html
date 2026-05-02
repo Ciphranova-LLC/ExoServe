@@ -1,0 +1,14 @@
+<!-- Rename node dialog-->
+<dialog id="modal-renamenode" class="modal-root modal-sm">
+    <form method="dialog" class="modal-header">
+        <button class="button-close" title="Cancel">&#x2715;</button>
+    </form>
+    <div class="modal-body">
+        <h3 id="renamenode-prompt"></h3>
+        <input type="text" id="renamenode-name" placeholder="New name">
+    </div>
+    <footer>
+        <div class="button" onclick="ui_closeRenameNodeModal()">Cancel</div>
+        <div class="button" onclick="ui_submitRenameNodeModal()">Rename</div>
+    </footer>
+</dialog>

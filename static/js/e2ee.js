@@ -559,7 +559,13 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
 }
 
 // Update references affected by a new child
-async function e2ee_walkMerkleTree(crumbs, newChildName, newChildMetadata, hasLock = false) {
+async function e2ee_walkMerkleTree(
+    crumbs,
+    newChildName,
+    newChildMetadata,
+    hasLock = false,
+    oldChildName = null
+) {
     // Validate the breadcrumbs were given
     if (crumbs.length === 0) return null;
 
@@ -591,6 +597,10 @@ async function e2ee_walkMerkleTree(crumbs, newChildName, newChildMetadata, hasLo
 
             // Active directory: Insert the new metadata or delete the existing key
             if (i === crumbs.length - 1) {
+                if (oldChildName && oldChildName !== currChildName) {
+                    delete parent['children'][oldChildName];
+                }
+
                 if (!currChildMetadata) {
                     delete parent['children'][currChildName];
                 } else {
