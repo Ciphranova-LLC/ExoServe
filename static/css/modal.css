@@ -45,11 +45,11 @@
     flex-direction: column;
     align-items: center;
 
-    h2 {
+    h2, h3 {
         flex: 0 0 auto;
         width: 100%;
         margin: 0 0 15px 0;
-        text-align: center;
+        text-align: left;
 
         white-space: nowrap;
         overflow: hidden;
@@ -80,11 +80,6 @@
     }
 }
 
-.modal-center-footer footer {
-    justify-content: center;
-    gap: 20px;
-}
-
 /* Modal accessories */
 .button-close {
     background: none;
@@ -112,10 +107,31 @@
     &:has(iframe) {
         height: 90vh;
     }
+
+    h2, h3 {
+        text-align: center;
+    }
 }
 
 .modal-sm {
     width: 400px;
     max-width: 90vw;
     height: 200px;
+
+    h2, h3 {
+        text-align: left;
+        padding-left:5px;
+    }
+}
+
+.modal-center {
+    h2, h3 {
+        text-align: center;
+        padding-top: 25px;
+    }
+
+    footer {
+        justify-content: center;
+        gap: 20px;
+    }
 }
