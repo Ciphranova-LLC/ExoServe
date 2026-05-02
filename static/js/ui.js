@@ -55,6 +55,17 @@ function ui_initContextMenu() {
 
 /******************************/
 
+function ui_initNewFolderModal() {
+    const input = document.getElementById('newfolder-name');
+
+    input.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            ui_submitNewFolderModal();
+        }
+    });
+}
+
 function ui_showNewFolderModal() {
     if (!sessionStorage.getItem('key_uuid')) {
         ui_showToast('Key not set');
@@ -331,15 +342,7 @@ document.addEventListener('keydown', function (e) {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-    const input = document.getElementById('newfolder-name');
-
-    input.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-            event.preventDefault();
-            ui_submitNewFolderModal();
-        }
-    });
-
     ui_initContextMenu();
+    ui_initNewFolderModal();
     ui_initRenameNodeModal();
 });
