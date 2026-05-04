@@ -140,6 +140,22 @@ function __e2ee_refreshTableView(crumbs) {
     });
 }
 
+// Download a file to the client system
+async function e2ee_downloadFile(hash, decryptKey, filename) {
+    // Ensure there is a key
+    await e2ee_importBase64Key(decryptKey);
+
+    // Create an element to trigger the download manager
+    const a = document.createElement('a');
+    a.href = `/node/${hash}?download=true&filename=${encodeURIComponent(filename)}`;
+    a.download = filename;
+
+    // Click and cleanup
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
 // Encrypt and upload a Pfile in 5MB chunks
 async function e2ee_uploadFileChunked(file) {
     // Ease-of-use constants

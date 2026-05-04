@@ -1,70 +1,58 @@
-{% extends "base.html" %}
-
-{% block content %}
+{% extends "base.html" %} {% block content %}
 
 <!-- The main layout containing all elements-->
 <div class="layout-main">
-
     <!-- Sidebar Menu -->
     <nav class="sidebar-root">
-        <img src="static/img/favicon.png"/>
+        <img src="static/img/favicon.png" />
 
-        <hr/>
+        <hr />
 
         <div class="button" onclick="keyhandler_setSessionKey()" title="Set Key">
-            <img src="static/img/key-set.svg"/>
+            <img src="static/img/key-set.svg" />
         </div>
 
         <div class="button" onclick="keyhandler_generateAndDownloadKey()" title="Generate Key">
-            <img src="static/img/key-new.svg"/>
+            <img src="static/img/key-new.svg" />
         </div>
 
-        <hr/>
+        <hr />
 
         <div class="button" onclick="" title="Trash">
-            <img src="static/img/trashcan.svg"/>
+            <img src="static/img/trashcan.svg" />
         </div>
     </nav>
 
     <!-- Nested layout to contain session-specific details -->
     <main class="layout-session">
-
         <!-- Search bar -->
         <div class="area-search">
-            <input type="text" placeholder="Search...">
+            <input type="text" placeholder="Search..." />
             <pre id="key-name">No key set</pre>
         </div>
 
         <!-- Interaction buttons -->
         <div class="area-button">
-
             <div class="dropdown-container" id="dropdown-upload">
                 <div class="button" onclick="ui_toggleDropdown('dropdown-upload')" title="Upload">
-                    <img src="static/img/arrow-up.svg"/>
+                    <img src="static/img/arrow-up.svg" />
                     Upload
                 </div>
                 <div class="dropdown-menu">
                     <div class="dropdown-item" onclick="ui_triggerFileUpload()">
-                        <img src="static/img/upload-file.svg"/>
+                        <img src="static/img/upload-file.svg" />
                         Upload File
                     </div>
                     <div class="dropdown-item" onclick="ui_triggerFolderUpload()">
-                        <img src="static/img/upload-folder.svg"/>
+                        <img src="static/img/upload-folder.svg" />
                         Upload Folder
                     </div>
                 </div>
             </div>
-            
+
             <div class="button" onclick="ui_showNewFolderModal()" title="New folder">
-                <img src="static/img/new-folder.svg"/>
+                <img src="static/img/new-folder.svg" />
                 New folder
-            </div>
-
-            <vr></vr>
-
-            <div class="button" onclick="" title="Download">
-                <img src="static/img/arrow-down.svg"/>
-                Download
             </div>
         </div>
 
@@ -78,39 +66,32 @@
         <!-- File table -->
         <div class="area-files">
             <div class="file-table">
-
                 <table class="table sortable-table">
                     <thead>
                         <tr>
                             <th id="header-checkbox" class="column-checkbox">
-                                <input class="checkbox-header" type="checkbox">
+                                <input class="checkbox-header" type="checkbox" />
                             </th>
-                            <th id="header-name"> Name </th>
-                            <th id="header-date"> Date Added </th>
-                            <th id="header-type"> Type </th>
-                            <th id="header-size"> Size </th>
+                            <th id="header-name">Name</th>
+                            <th id="header-date">Date Added</th>
+                            <th id="header-type">Type</th>
+                            <th id="header-size">Size</th>
                         </tr>
                         <colgroup>
-                            <col style="width: 5%;">
-                            <col style="width: 55%;">
-                            <col style="width: 20%;">
-                            <col style="width: 10%;">
-                            <col style="width: 10%;">
+                            <col style="width: 5%" />
+                            <col style="width: 55%" />
+                            <col style="width: 20%" />
+                            <col style="width: 10%" />
+                            <col style="width: 10%" />
                         </colgroup>
                     </thead>
-                    <tbody id="file-table-body">
-                    </tbody>
+                    <tbody id="file-table-body"></tbody>
                 </table>
-
             </div>
         </div>
     </main>
-
 </div>
 
-{% include "modals/contextmenu.html" %}
-{% include "modals/newfolder.html" %}
-{% include "modals/preview.html" %}
-{% include "modals/renamenode.html" %}
-{% include "modals/yesno.html" %}
-{% endblock %}
+{% include "modals/contextmenu.html" %} {% include "modals/newfolder.html" %} {% include
+"modals/preview.html" %} {% include "modals/renamenode.html" %} {% include "modals/yesno.html" %} {%
+endblock %}

@@ -206,6 +206,28 @@ function ui_submitRenameNodeModal() {
 
 /******************************/
 
+function ui_triggerDownload() {
+    // Hide the context menu
+    const contextMenu = document.getElementById('context-menu');
+    contextMenu.classList.remove('active');
+
+    if (!sessionStorage.getItem('key_uuid')) {
+        ui_showToast('Key not set');
+        return;
+    }
+    if (!activeContextNode) return;
+
+    // Only support file downloads for now
+    if (activeContextNode.type === 'file') {
+        ui_showToast(`Downloading ${activeContextNode.name}...`);
+        e2ee_downloadFile(activeContextNode.hash, activeContextNode.key, activeContextNode.name);
+    } else {
+        ui_showToast('Folder downloads not current supported.');
+    }
+}
+
+/******************************/
+
 function ui_showToast(message, durationMs = 3000) {
     const container = document.getElementById('toast-container');
     if (!container) return;
