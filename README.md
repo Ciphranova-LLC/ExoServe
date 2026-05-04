@@ -8,7 +8,7 @@ Existing features include:
 
 - **File Content Encryption:** All files are encrypted with cryptographically random, unique keys before leaving the browser.
 - **File System Encryption:** Directory structures are obfuscated using a **Merkle tree** and stored using **hash sharding**.
-- **Zero-Knowledge Backend:** The server acts purely as a blob store with no knowledge of stored files.
+- **Zero-Knowledge Backend:** The server acts as a blob store with no knowledge on stored files.
 - **WebUI:** Native browser interface for uploading, managing, and previewing files.
 
 ## Cryptographic Architecture
@@ -17,7 +17,7 @@ ExoServe utilizes a strict separation of concerns to maintain privacy. The front
 
 ### The Zero-Knowledge Server
 
-The server has no knowledge of the file topology, file names, nor file types. When a user uploads a file or creates a folder, the server only receives an encrypted binary blob and a cryptographic hash. The server simply saves the blob and returns it when requested. If the server host is compromised, the attacker only gains access to encrypted binary.
+The server has no knowledge of the file topology, file names, nor file types. When a user uploads a file or creates a folder, the server only receives an encrypted binary blob and a cryptographic hash. The server saves the blob and returns it when requested. If the server host is compromised, the attacker only gains access to encrypted binary.
 
 ### File System & Merkle Tree
 
@@ -45,7 +45,8 @@ ExoServe features a lightweight, responsive WebUI built entirely in vanilla Java
 
 - breadcrumb navigation,
 - column sorting,
-- and folder management,
+- folder management,
+- and right-click context menu,
 
 All while operating strictly within a zero-knowledge paradigm.
 
@@ -76,15 +77,18 @@ Future updates to the authentication system will introduce tiered security optio
 
 Special care was used to ensure the stack remains lightweight, dependency-free where possible, and highly customizable.
 
-- **Frontend:** Built with **Vanilla JS**, HTML, and CSS. No heavy frameworks (like React or Vue) or package managers (like npm) are required. The native Web Crypto API is used for all hashing and AES encryption.
+- **Frontend:** Built with **Vanilla JS**, HTML, and CSS. No heavy framework or package managers are required. The native Web Crypto API is used for all hashing and AES encryption.
 - **Backend:** Built with **Python Flask**. Keeps the server logic simple, readable, and highly extensible for home lab environments.
 
 ## The Fine Print
 
-While the server has zero knowledge of file contents, file names, and directory topology, metadata could be ascertained by monitoring live network traffic or observing file attributes.
+While the server has zero knowledge at rest (file contents, file names, and directory topology), metadata could be ascertained while the data is in transit by monitoring live network traffic.
 
-For example, assume there is a 400 MB file that a client is streaming in small chunks. A bad actor could conclude that the encrypted blob is some video. Likewise, the bad actor can conclude that the previous hash accessed using the `/node` route is the directory containing that video file.
+This is a standard convenience-versus-security tradeoff. The alternative is to:
 
-Despite this, the bad actor cannot conclude the contents or exact file format from this metadata. Furthermore, the body of each request is not logged or otherwise stored on disk under normal configuration. This means that the malicious networking monitoring would need to occur as the client is active or the server would need to be previously compromised.
+- Have the client wholly download all files to mitigate streaming metadata leakage.
+- Chunk files on the server to mitigate file size metadata leakage.
+- Generate dummy traffic to obfuscate sequentially requested chunks being related.
+- Throttle requests to a constant bitrate to mitigte rapidly requested chunks being related
 
-This is a standard convenience-versus-security tradeoff; the alternative is to have the client wholly download all files, including video files. It is not currently on the roadmap to allow the user to make this decision, since the experience would be sluggish and still leaves the file size as a point of metadata.
+This design is not currently on the roadmap, since the experience would be sluggish.
