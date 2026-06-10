@@ -1,32 +1,22 @@
 // Key in use
 let activeDecryptionKey = null;
-let base64___ = null;
 const ivCache = new Map();
 
-// Helper to save/load the key across Service Worker sleep cycles
+// Constants
+const CHUNK_P_SIZE = 5 * 1024 * 1024; // 5MB Plaintext Chunk
+const CHUNK_E_SIZE = CHUNK_P_SIZE + 16; // 5MB + 16-byte Auth Tag
+
+// Helper to pull the CryptoKey object out of IndexedDB
 const keyDB = {
-    async get() {
+    async getActiveKey() {
         return new Promise((resolve, reject) => {
             const req = indexedDB.open('e2ee-store', 1);
             req.onupgradeneeded = (e) => e.target.result.createObjectStore('keys');
             req.onsuccess = (e) => {
                 const store = e.target.result.transaction('keys', 'readonly').objectStore('keys');
-                const getReq = store.get('master_base64');
+                const getReq = store.get('active_crypto_key');
                 getReq.onsuccess = () => resolve(getReq.result);
                 getReq.onerror = () => reject(getReq.error);
-            };
-            req.onerror = () => reject(req.error);
-        });
-    },
-    async set(value) {
-        return new Promise((resolve, reject) => {
-            const req = indexedDB.open('e2ee-store', 1);
-            req.onupgradeneeded = (e) => e.target.result.createObjectStore('keys');
-            req.onsuccess = (e) => {
-                const store = e.target.result.transaction('keys', 'readwrite').objectStore('keys');
-                const putReq = store.put(value, 'master_base64');
-                putReq.onsuccess = () => resolve();
-                putReq.onerror = () => reject(putReq.error);
             };
             req.onerror = () => reject(req.error);
         });
@@ -41,33 +31,14 @@ self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
-    // Arming Route (forcefully load the key into RAM)
+    // Arming Route (forcefully load the key into RAM from IndexedDB)
     if (url.pathname === '/arm-worker') {
         event.respondWith(
             (async () => {
                 try {
-                    const base64Key = event.request.headers.get('x-key');
-                    if (!base64Key) return new Response('Missing key', { status: 400 });
-
-                    // SAVE TO IndexedDB
-                    await keyDB.set(base64Key);
-
-                    // Decode Base64 to ArrayBuffer
-                    const binaryStr = atob(base64Key);
-                    const bytes = new Uint8Array(binaryStr.length);
-                    for (let i = 0; i < binaryStr.length; i++) {
-                        bytes[i] = binaryStr.charCodeAt(i);
-                    }
-
-                    // Import and compile the key
-                    activeDecryptionKey = await crypto.subtle.importKey(
-                        'raw',
-                        bytes.buffer,
-                        { name: 'AES-CTR' },
-                        false,
-                        ['decrypt']
-                    );
-
+                    activeDecryptionKey = await keyDB.getActiveKey();
+                    if (!activeDecryptionKey)
+                        return new Response('Missing key in DB', { status: 400 });
                     return new Response('Worker Armed', { status: 200 });
                 } catch (err) {
                     console.error('Failed to arm worker:', err);
@@ -80,36 +51,22 @@ self.addEventListener('fetch', (event) => {
 
     // The File Routes
     if (url.pathname.includes('/node') && event.request.method === 'GET') {
+        // Bypass the Service Worker if the UI requests raw encrypted bytes
+        if (url.searchParams.get('raw') === 'true') {
+            return;
+        }
         event.respondWith(handleDecryption(event.request, event.clientId));
     }
 });
 
 // Ensure a key is in use
 async function ensureKey() {
-    // The key is already in RAM
     if (activeDecryptionKey) return true;
-
-    // The service worker was never armed
-    const savedBase64 = await keyDB.get();
-    if (!savedBase64) return false;
-
-    // The service worker fell asleep and woke up
-    const binaryStr = atob(savedBase64);
-    const bytes = new Uint8Array(binaryStr.length);
-    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-
-    activeDecryptionKey = await crypto.subtle.importKey(
-        'raw',
-        bytes.buffer,
-        { name: 'AES-CTR' },
-        false,
-        ['decrypt']
-    );
-
-    return true;
+    activeDecryptionKey = await keyDB.getActiveKey();
+    return !!activeDecryptionKey;
 }
 
-// Wholly decrypt a file
+// Wholly decrypt a non-streamed file
 async function decryptWhole(cleanServerUrl, clientId, filename) {
     // Validate there is a key
     const isArmed = await ensureKey();
@@ -117,22 +74,54 @@ async function decryptWhole(cleanServerUrl, clientId, filename) {
 
     // Get the extension from the clean URL
     const ext = cleanServerUrl.split('.').pop().toLowerCase();
-
-    // Try to download
     const res = await fetch(cleanServerUrl);
     if (!res.ok) return res;
 
-    // Split the data
+    // Try to download
     const encryptedBuffer = await res.arrayBuffer();
-    const iv = encryptedBuffer.slice(0, 16);
-    const dataToDecrypt = encryptedBuffer.slice(16);
 
-    // Decrypt
-    const decryptedBuffer = await crypto.subtle.decrypt(
-        { name: 'AES-CTR', counter: iv, length: 64 },
-        activeDecryptionKey,
-        dataToDecrypt
-    );
+    // Split the data and crypto components
+    const fileIvBuffer = encryptedBuffer.slice(0, 12);
+    const fileIv = new Uint8Array(fileIvBuffer);
+    const eData = encryptedBuffer.slice(12);
+
+    // Calculate how many chunks there are to process
+    const totalChunks = Math.ceil(eData.byteLength / CHUNK_E_SIZE);
+    
+    // Arrays to hold the stitched data
+    const decryptedChunks = [];
+    let totalPlaintextSize = 0;
+
+    // Loop through and decrypt each chunk individually
+    for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_E_SIZE;
+        const end = Math.min(start + CHUNK_E_SIZE, eData.byteLength);
+        const chunkCiphertext = eData.slice(start, end);
+
+        // Calculate the deterministic chunk IV
+        const chunkIv = new Uint8Array(12);
+        chunkIv.set(fileIv);
+        const view = new DataView(chunkIv.buffer);
+        view.setUint32(8, view.getUint32(8) + i);
+
+        // Decrypt the isolated chunk
+        const plainChunk = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: chunkIv },
+            activeDecryptionKey,
+            chunkCiphertext
+        );
+        
+        decryptedChunks.push(new Uint8Array(plainChunk));
+        totalPlaintextSize += plainChunk.byteLength;
+    }
+
+    // Stitch the plaintext chunks back into one file
+    const finalData = new Uint8Array(totalPlaintextSize);
+    let offset = 0;
+    for (const chunk of decryptedChunks) {
+        finalData.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
 
     // Configure return headers
     const headers = new Headers(res.headers);
@@ -148,10 +137,12 @@ async function decryptWhole(cleanServerUrl, clientId, filename) {
         headers.set('Content-Disposition', `attachment; filename="${filename}"`);
     }
 
-    return new Response(decryptedBuffer, { headers });
+    // Hint to garbage collector and return
+    decryptedChunks.length = 0; 
+    return new Response(finalData, { headers });
 }
 
-// Stream decryption of video or wholly decrypt anything else
+// Stream decryption of video using Chunked AEAD
 async function handleDecryption(request, clientId) {
     const urlObj = new URL(request.url);
     const ext = (urlObj.searchParams.get('ext') || urlObj.pathname.split('.').pop()).toLowerCase();
@@ -174,18 +165,19 @@ async function handleDecryption(request, clientId) {
         if (!isArmed) return fetch(request);
         let ivBuffer;
         let totalPlaintextSize;
+        let totalEncryptedSize;
 
-        // Check if IV and size are cached
+        // Fetch IV and compute total plaintext size backwards from the server's encrypted size
         if (ivCache.has(cleanServerUrl)) {
             const cached = ivCache.get(cleanServerUrl);
             ivBuffer = cached.iv;
-            totalPlaintextSize = cached.totalSize;
-        }
-        // Not cached, fallback to server request to cache it
-        else {
-            const ivRes = await fetch(cleanServerUrl, { headers: { Range: 'bytes=0-15' } });
+            totalPlaintextSize = cached.totalPlaintextSize;
+            totalEncryptedSize = cached.totalEncryptedSize;
+        } else {
+            // Request just the 12-byte File IV
+            const ivRes = await fetch(cleanServerUrl, { headers: { Range: 'bytes=0-11' } });
 
-            // if the server did not like the request, emit an error
+            // If the server did not like the request, emit an error
             if (!ivRes.ok) {
                 if (ivRes.status === 403) {
                     const errorText = await ivRes.text();
@@ -207,12 +199,14 @@ async function handleDecryption(request, clientId) {
             const contentRange = ivRes.headers.get('Content-Range');
             if (!contentRange) return new Response('Server configuration error', { status: 500 });
 
-            // Extract the file size
-            const totalEncryptedSize = parseInt(contentRange.split('/')[1], 10);
-            totalPlaintextSize = totalEncryptedSize - 16;
+            totalEncryptedSize = parseInt(contentRange.split('/')[1], 10);
 
-            // Cache the values
-            ivCache.set(cleanServerUrl, { iv: ivBuffer, totalSize: totalPlaintextSize });
+            // Derive plaintext size (remove the 12-byte IV and subtract the 16-byte tag per chunk)
+            const eData = totalEncryptedSize - 12;
+            const nChunks = Math.ceil(eData / CHUNK_E_SIZE);
+            totalPlaintextSize = eData - nChunks * 16;
+
+            ivCache.set(cleanServerUrl, { iv: ivBuffer, totalPlaintextSize, totalEncryptedSize });
         }
 
         // Craft the range header
@@ -222,39 +216,52 @@ async function handleDecryption(request, clientId) {
         let end = endStr ? parseInt(endStr, 10) : totalPlaintextSize - 1;
 
         // Clamp the range
-        const CHUNK_SIZE = 5 * 1024 * 1024;
-        if (end - start + 1 > CHUNK_SIZE) end = start + CHUNK_SIZE - 1;
         if (end >= totalPlaintextSize) end = totalPlaintextSize - 1;
-        const alignedStart = Math.floor(start / 16) * 16;
-        const paddingLeft = start - alignedStart;
-        const fetchStart = alignedStart + 16;
-        const fetchEnd = end + 16;
 
-        // Download one chunk
+        // Determine which chunk contains the requested start byte
+        const startChunkIndex = Math.floor(start / CHUNK_P_SIZE);
+
+        // Clamp the fetch to ONLY return data from this specific chunk
+        // NOTE: The browser issues a new HTTP request for the next chunk automatically
+        let fetchEnd = Math.min(end, (startChunkIndex + 1) * CHUNK_P_SIZE - 1);
+
+        // Calculate the encrypted byte bounds on the server
+        const serverStart = 12 + startChunkIndex * CHUNK_E_SIZE;
+
+        // Clamp the server end byte to prevent overflowing the actual file size on the final chunk
+        const serverEnd = Math.min(serverStart + CHUNK_E_SIZE - 1, totalEncryptedSize - 1);
+
+        // Fetch the encrypted chunk
         let chunkRes = await fetch(cleanServerUrl, {
-            headers: { Range: `bytes=${fetchStart}-${fetchEnd}` },
+            headers: { Range: `bytes=${serverStart}-${serverEnd}` },
         });
         let encryptedChunk = await chunkRes.arrayBuffer();
 
-        // Configure decryption
-        const counter = new Uint8Array(ivBuffer.slice(0));
-        const view = new DataView(counter.buffer);
-        const blockOffset = BigInt(alignedStart / 16);
-        view.setBigUint64(8, view.getBigUint64(8) + blockOffset);
+        // Calculate the Chunk IV (File IV + chunk index)
+        const chunkIv = new Uint8Array(12);
+        chunkIv.set(new Uint8Array(ivBuffer));
+        const view = new DataView(chunkIv.buffer);
+        view.setUint32(8, view.getUint32(8) + startChunkIndex);
 
-        // Decrypt
+        // Decrypt the chunk
         let decryptedChunk = await crypto.subtle.decrypt(
-            { name: 'AES-CTR', counter, length: 64 },
+            { name: 'AES-GCM', iv: chunkIv },
             activeDecryptionKey,
             encryptedChunk
         );
 
-        // Remove padding
-        const finalData = new Uint8Array(decryptedChunk, paddingLeft);
+        // Slice out the plaintext bytes requested by the browser
+        const localStartOffset = start % CHUNK_P_SIZE;
+        const localEndOffset = fetchEnd % CHUNK_P_SIZE;
+        const finalData = new Uint8Array(
+            decryptedChunk,
+            localStartOffset,
+            localEndOffset - localStartOffset + 1
+        );
 
-        // Configure return headers
+        // Send the plaintext bytes back to the video player
         const headers = new Headers();
-        headers.set('Content-Range', `bytes ${start}-${end}/${totalPlaintextSize}`);
+        headers.set('Content-Range', `bytes ${start}-${fetchEnd}/${totalPlaintextSize}`);
         headers.set('Content-Length', finalData.byteLength);
         headers.set('Content-Type', `video/${ext}`);
         headers.set('Accept-Ranges', 'bytes');

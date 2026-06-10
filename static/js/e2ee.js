@@ -3,6 +3,44 @@ const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg'];
 
 let currBlobUrl = null;
 
+// Global IndexedDB handler for securely storing CryptoKey objects
+const keyDB = {
+    async _getStore(mode) {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open('e2ee-store', 1);
+            req.onupgradeneeded = (e) => e.target.result.createObjectStore('keys');
+            req.onsuccess = (e) =>
+                resolve(e.target.result.transaction('keys', mode).objectStore('keys'));
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async setActiveKey(cryptoKey) {
+        const store = await this._getStore('readwrite');
+        return new Promise((resolve, reject) => {
+            const req = store.put(cryptoKey, 'active_crypto_key');
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async getRootKey() {
+        const store = await this._getStore('readonly');
+        return new Promise((resolve, reject) => {
+            const req = store.get('master_root_key');
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async setRootKey(cryptoKey) {
+        const store = await this._getStore('readwrite');
+        return new Promise((resolve, reject) => {
+            const req = store.put(cryptoKey, 'master_root_key');
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    },
+};
+
+// Global lock for the Merkle tree within the same session
 class MerkleMutex {
     constructor() {
         this._locked = false;
@@ -43,20 +81,32 @@ function escapeHtml(str) {
     );
 }
 
-// Create the cryptoKey from the string representation
-async function e2ee_importBase64Key(base64Key) {
-    const raw = Uint8Array.from(atob(base64Key), (c) => c.charCodeAt(0));
+// Parse the key in memory
+async function e2ee_parseKey(keyInput) {
+    // Intercept UI flags for the root folder
+    if (keyInput === 'ROOT' || keyInput === null || keyInput === 'null') {
+        return await keyDB.getRootKey();
+    }
 
-    // Store base64 key in service worker's memory
-    await fetch('/arm-worker', { headers: { 'x-key': base64Key } });
+    // If we are passing a base64 string from the Merkle tree metadata
+    else if (typeof keyInput === 'string') {
+        const raw = Uint8Array.from(atob(keyInput), (c) => c.charCodeAt(0));
+        return await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, [
+            'encrypt',
+            'decrypt',
+        ]);
+    }
 
-    return await crypto.subtle.importKey(
-        'raw', // format
-        raw, // raw key bytes
-        { name: 'AES-CTR' }, // algorithm
-        false, // not extractable
-        ['encrypt', 'decrypt'] // intended usage
-    );
+    // Returned the parsed key
+    return keyInput;
+}
+
+// Convert a base64 key, handle the ROOT flag, or accept a CryptoKey directly
+async function e2ee_armWorker(keyInput) {
+    const cryptoKey = await e2ee_parseKey(keyInput);
+    await keyDB.setActiveKey(cryptoKey);
+    await fetch('/arm-worker');
+    return cryptoKey;
 }
 
 // Helper function to upload a file that has already been selected
@@ -142,8 +192,7 @@ function __e2ee_refreshTableView(crumbs) {
 
 // Download a file to the client system
 async function e2ee_downloadFile(hash, decryptKey, filename) {
-    // Ensure there is a key
-    await e2ee_importBase64Key(decryptKey);
+    await e2ee_armWorker(decryptKey);
 
     // Create an element to trigger the download manager
     const a = document.createElement('a');
@@ -156,17 +205,19 @@ async function e2ee_downloadFile(hash, decryptKey, filename) {
     document.body.removeChild(a);
 }
 
-// Encrypt and upload a Pfile in 5MB chunks
+// Encrypt and upload a file in 5MB chunks
 async function e2ee_uploadFileChunked(file) {
     // Ease-of-use constants
     const CHUNK_SIZE = 5 * 1024 * 1024;
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
     // Generate a random encryption key and IV
-    const cryptoKey = await crypto.subtle.generateKey({ name: 'AES-CTR', length: 256 }, true, [
+    const cryptoKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
         'encrypt',
     ]);
-    const iv = crypto.getRandomValues(new Uint8Array(16));
+
+    // Generate a single 12-byte File IV
+    const fileIv = crypto.getRandomValues(new Uint8Array(12));
     const id = btoa(crypto.getRandomValues(new Uint8Array(4)));
 
     // Hashes of chunks are tracked since incremental hashing is not supported :(
@@ -191,25 +242,27 @@ async function e2ee_uploadFileChunked(file) {
         const chunkBlob = file.slice(start, end);
         const chunkBuffer = await chunkBlob.arrayBuffer();
 
-        // Calculate the AES-CTR counter
-        const counter = new Uint8Array(iv);
-        const view = new DataView(counter.buffer);
-        const blockOffset = BigInt(start / 16);
-        view.setBigUint64(8, view.getBigUint64(8) + blockOffset);
+        // Calculate Deterministic Chunk IV (File IV + Chunk Index)
+        const chunkIv = new Uint8Array(12);
+        chunkIv.set(fileIv);
+        const view = new DataView(chunkIv.buffer);
 
-        // Encrypt the chunk
+        // Use setUint32 on the last 4 bytes of the 12-byte IV to add the index
+        view.setUint32(8, view.getUint32(8) + i);
+
+        // Encrypt with AES-GCM (automatically appending a 16 byte Auth Tag)
         const encryptedChunk = await crypto.subtle.encrypt(
-            { name: 'AES-CTR', counter, length: 64 },
+            { name: 'AES-GCM', iv: chunkIv },
             cryptoKey,
             chunkBuffer
         );
 
-        // If this is the first chunk, prepend the IV
+        // Prepend the 12-byte File IV to the first chunk
         let payload;
         if (i === 0) {
-            payload = new Uint8Array(16 + encryptedChunk.byteLength);
-            payload.set(iv, 0);
-            payload.set(new Uint8Array(encryptedChunk), 16);
+            payload = new Uint8Array(12 + encryptedChunk.byteLength);
+            payload.set(fileIv, 0);
+            payload.set(new Uint8Array(encryptedChunk), 12);
         } else {
             payload = new Uint8Array(encryptedChunk);
         }
@@ -316,10 +369,10 @@ async function e2ee_uploadFolder(crumbs) {
 
         try {
             // Get the total size of all files
-            totalSize = 0;
+            let totalSize = 0;
             for (let i = 0; i < files.length; i++) totalSize += files[i].size;
 
-            uploadedSize = 0;
+            let uploadedSize = 0;
             for (let i = 0; i < files.length; i++) {
                 const file = files[i];
 
@@ -374,24 +427,25 @@ async function e2ee_uploadFolder(crumbs) {
     input.click();
 }
 
-// Encrypt a whole blob of data
+// Encrypt a whole blob of data on the main thread
 // The data must be small, otherwise an OOM error will occur!
-async function e2ee_encryptWhole(data, keyBase64) {
-    // Enroll the key
-    let key = await e2ee_importBase64Key(keyBase64);
+async function e2ee_encryptWhole(data, keyInput) {
+    let key = await e2ee_parseKey(keyInput);
 
     // Encrypt
     const encodedData = new TextEncoder().encode(data);
-    const counter = window.crypto.getRandomValues(new Uint8Array(16));
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
     const encryptedBuffer = await window.crypto.subtle.encrypt(
-        { name: 'AES-CTR', counter: counter, length: 64 },
+        { name: 'AES-GCM', iv: iv },
         key,
         encodedData
     );
+
     const ciphertext = new Uint8Array(encryptedBuffer);
-    const combinedData = new Uint8Array(counter.length + ciphertext.length);
-    combinedData.set(counter, 0);
-    combinedData.set(ciphertext, counter.length);
+    const combinedData = new Uint8Array(12 + ciphertext.length);
+    combinedData.set(iv, 0);
+    combinedData.set(ciphertext, 12);
 
     // Hash
     const hashBuffer = await window.crypto.subtle.digest('SHA-256', combinedData);
@@ -415,23 +469,29 @@ async function e2ee_fetchFolder(id = '', decryptKey = null) {
         return;
     }
 
-    // Import the key, defaulting to the session key
-    if (decryptKey == null) {
-        decryptKey = sessionStorage.getItem('fernet_key');
-        if (!decryptKey) {
-            alert('Key not set');
-            return;
-        }
-    }
-    await e2ee_importBase64Key(decryptKey);
+    // Parse the key into memory
+    if (decryptKey == null) decryptKey = 'ROOT';
+    const cryptoKey = await e2ee_parseKey(decryptKey);
 
-    // Use a special target for the rppt folder
     const targetId = id === null || id.length === 0 ? 'root' : id;
 
-    // GET the folder from the server
-    const res = await fetch(`/node/${targetId}`);
-    const folderJson = JSON.parse(await res.text());
-    return folderJson;
+    // Fetch raw bytes
+    const res = await fetch(`/node/${targetId}?raw=true`);
+    if (!res.ok) throw new Error('Failed to fetch folder from server');
+
+    // Decrypt in the main thread
+    const encryptedBuffer = await res.arrayBuffer();
+    const iv = encryptedBuffer.slice(0, 12);
+    const dataToDecrypt = encryptedBuffer.slice(12);
+
+    const decryptedBuffer = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv },
+        cryptoKey,
+        dataToDecrypt
+    );
+
+    const text = new TextDecoder().decode(decryptedBuffer);
+    return JSON.parse(text);
 }
 
 // Upload a new, empty folder to the server
@@ -448,19 +508,22 @@ async function e2ee_newFolder(
     }
 
     // Only the root is encrypted with the session key
-    let encryptKeyBase64;
+    let encryptKeyInput;
+    let encryptKeyBase64 = null;
+
     if (isRoot) {
-        encryptKeyBase64 = sessionStorage.getItem('fernet_key');
+        encryptKeyInput = 'ROOT';
+        encryptKeyBase64 = 'ROOT';
     } else {
-        encryptKeyBase64 = await crypto.subtle
-            .generateKey({ name: 'AES-CTR', length: 256 }, true, ['encrypt', 'decrypt'])
-            .then((key) => crypto.subtle.exportKey('raw', key))
-            .then((raw) => btoa(String.fromCharCode(...new Uint8Array(raw))));
+        const rawKey = await crypto.subtle
+            .generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
+            .then((key) => crypto.subtle.exportKey('raw', key));
+        encryptKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(rawKey)));
+        encryptKeyInput = encryptKeyBase64;
     }
 
-    // Create and encrypt an empty directory node
     const jsonString = JSON.stringify({ type: 'folder', children: {} });
-    const combinedData = await e2ee_encryptWhole(jsonString, encryptKeyBase64);
+    const combinedData = await e2ee_encryptWhole(jsonString, encryptKeyInput);
 
     // Create the upload details
     let details = JSON.stringify({
@@ -509,8 +572,7 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
         return;
     }
 
-    // Import the key
-    await e2ee_importBase64Key(decryptKey);
+    await e2ee_armWorker(decryptKey);
 
     // Initialize the nested HTML
     let html = `<h2>${filename}</h2>`;
@@ -704,12 +766,7 @@ navigator.serviceWorker.addEventListener('message', (event) => {
     // Failure from the server when downloading a video
     if (event.data && event.data.type === 'VIDEO_403_ERROR') {
         console.error('VIDEO_403_ERROR');
-
-        // Find all video tags on the page (there should only be one)
         const videos = document.querySelectorAll('video');
-        console.error(videos);
-
-        // Replace the video with the error
         videos.forEach((video) => {
             const errorContainer = document.createElement('div');
             errorContainer.innerHTML = 'Error: ' + event.data.body;

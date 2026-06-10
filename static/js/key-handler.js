@@ -56,14 +56,20 @@ async function keyhandler_setSessionKey() {
             // Parse and validate the lines
             const key = keyLine.split('key:')[1].trim();
             const uuid = uuidLine.split('uuid:')[1].trim();
-            atob(key);
 
-            // Save the metadata in sessionStorage
-            sessionStorage.setItem('fernet_key', key);
+            // Only the non-sensitive UUID goes into sessionStorage now
             sessionStorage.setItem('key_uuid', uuid);
 
-            // Import the key for encryption
-            await e2ee_importBase64Key(key);
+            // Import the root key as a strict AES-GCM CryptoKey object and save to IndexedDB
+            const raw = Uint8Array.from(atob(key), (c) => c.charCodeAt(0));
+            const rootCryptoKey = await crypto.subtle.importKey(
+                'raw',
+                raw,
+                { name: 'AES-GCM' },
+                false,
+                ['encrypt', 'decrypt']
+            );
+            await keyDB.setRootKey(rootCryptoKey);
 
             // Check for the loaded key
             keyhandler_check();
@@ -80,17 +86,20 @@ async function keyhandler_setSessionKey() {
 async function keyhandler_check() {
     const keyNamePre = document.getElementById('key-name');
     const storedKeyUuid = sessionStorage.getItem('key_uuid');
-    const storedKey = sessionStorage.getItem('fernet_key');
 
-    if (storedKey && storedKeyUuid) {
+    // Check for the Root Key object in IndexedDB
+    const storedRootKey = await keyDB.getRootKey();
+
+    if (storedRootKey && storedKeyUuid) {
         let res = await keyhandler_sendKeyToServer(storedKeyUuid);
         let rootHash = await res.text();
 
         if (res.ok) {
             if (res.status == 204 || rootHash.trim() === '')
-                rootHash = (await e2ee_newFolder((isRoot = true)))['hash'];
+                rootHash = (await e2ee_newFolder(isRoot = true))['hash'];
             keyNamePre.textContent = storedKeyUuid;
-            filetable_goToFolder(rootHash, storedKey, 'Home');
+
+            filetable_goToFolder(rootHash, 'ROOT', 'Home');
             return true;
         } else {
             keyNamePre.textContent = 'No key set';

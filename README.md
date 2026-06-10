@@ -17,7 +17,9 @@ ExoServe utilizes a strict separation of concerns to maintain privacy. The front
 
 ### The Zero-Knowledge Server
 
-The server has no knowledge of the file topology, file names, nor file types. When a user uploads a file or creates a folder, the server only receives an encrypted binary blob and a cryptographic hash. The server saves the blob and returns it when requested. If the server host is compromised, the attacker only gains access to encrypted binary.
+The server has no knowledge of the file topology, file names, nor file types. When a user uploads a file, it is encrypted and authenticated using AES-GCM, which provides both confidentiality and data integrity. Each encrypted blob includes an authentication tag that allows the server (and client) to detect any modification rendering tampering immediately detectable. Additionally, file names on the server are never stored plaintext; instead, each blob's filename is derived deterministically from its cryptographic hash (e.g., `sha256(encrypted_content)`), ensuring name-to-content binding and preventing aliasing or symlink-based attacks.
+
+As a result, if a malicious actor compromises the server and attempts to replace, alter, or reorder blobs, they cannot generate valid authentication tags nor matching hashes without access to the plaintext or keys. Since all cryptographic operations are client-side, the server has no way to fabricate valid replacements.
 
 ### File System & Merkle Tree
 
@@ -89,6 +91,6 @@ This is a standard convenience-versus-security tradeoff. The alternative is to:
 - Have the client wholly download all files to mitigate streaming metadata leakage.
 - Chunk files on the server to mitigate file size metadata leakage.
 - Generate dummy traffic to obfuscate sequentially requested chunks being related.
-- Throttle requests to a constant bitrate to mitigte rapidly requested chunks being related
+- Throttle requests to a constant bitrate to mitigate rapidly requested chunks being related
 
 This design is not currently on the roadmap, since the experience would be sluggish.
