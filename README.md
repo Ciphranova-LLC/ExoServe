@@ -2,11 +2,11 @@
 
 <p align="center"> <img src="doc/img/exoserve_logo.png"/> </p>
 
-**ExoServe** is a self-hosted, **end-to-end encrypted** (E2EE) file storage solution inspired by [MEGA](https://mega.io/). Designed specifically to be hosted on a home server, it prioritizes privacy by utilizing a **zero-knowledge** architecture. All cryptographic operations are handled exclusively in the browser using a vanilla WebUI, ensuring the server never has access to unencrypted data or plaintext filenames.
+**ExoServe** is a self-hosted, **end-to-end encrypted** (E2EE) file storage solution. Designed specifically to be hosted on a local hardware, it prioritizes privacy by utilizing a **zero-knowledge** architecture. All cryptographic operations are handled exclusively on-device using a vanilla WebUI, ensuring the server never has access to unencrypted data or plaintext filenames.
 
 Existing features include:
 
-- **File Content Encryption:** All files are encrypted with cryptographically random, unique keys before leaving the browser.
+- **File Content Encryption:** All files are encrypted with cryptographically random, unique keys before leaving the device.
 - **File System Encryption:** Directory structures are obfuscated using a **Merkle tree** and stored using **hash sharding**.
 - **Zero-Knowledge Backend:** The server acts as a blob store with no knowledge on stored files.
 - **WebUI:** Native browser interface for uploading, managing, and previewing files.
@@ -78,7 +78,7 @@ Future updates to the authentication system will introduce tiered security optio
 Special care was used to ensure the stack remains lightweight, dependency-free where possible, and highly customizable.
 
 - **Frontend:** Built with **Vanilla JS**, HTML, and CSS. No heavy framework or package managers are required. The native Web Crypto API is used for all hashing and AES encryption.
-- **Backend:** Built with **Python Flask**. Keeps the server logic simple, readable, and highly extensible for home lab environments.
+- **Backend:** Built with **Python Flask**. Keeps the server logic simple, readable, and highly extensible for local environments.
 
 ## The Fine Print
 
