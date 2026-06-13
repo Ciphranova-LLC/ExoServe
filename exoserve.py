@@ -6,8 +6,8 @@ import re
 import uuid
 from datetime import datetime
 from flask import (
-    Flask, jsonify, render_template, request, send_file,
-    send_from_directory, session,
+    Flask, jsonify, redirect, render_template, request,
+    send_file, send_from_directory, session, url_for
 )
 from pathlib import Path
 from src.filesystem import KVDatabase, new_file, read_file, delete_file, unstage_file
@@ -30,8 +30,13 @@ app.secret_key = os.urandom(32)
 
 
 @app.route('/')
-def index():
-    return render_template('index.html')
+def serve_index():
+    return redirect('home')
+
+
+@app.route('/home')
+def serve_home():
+    return render_template('home.html')
 
 
 @app.route('/sw.js')
