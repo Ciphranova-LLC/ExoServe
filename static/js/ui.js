@@ -315,6 +315,68 @@ function ui_createProgressToast(filename) {
     };
 }
 
+function ui_createFolderProgressToast(folderName, fileName = null) {
+    const container = document.getElementById('toast-container');
+    if (!container) return null;
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+
+    // Status message, percentage, progress bar, and current file name
+    toast.innerHTML = `
+        <div style="display: flex; justify-content: space-between; gap: 20px; margin-bottom: 8px;">
+            <span class="toast-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                Uploading ${folderName}...
+            </span>
+            <span class="toast-percent" style="font-weight: bold;">0%</span>
+        </div>
+        <div style="height: 4px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; overflow: hidden;">
+            <div class="toast-progress-fill" style="height: 100%; width: 0%; background: goldenrod; transition: width 0.2s ease-out;"></div>
+        </div>
+        <div class="toast-file-info" style="margin-top: 8px; font-size: 12px; color: #ccc;">
+            <span class="current-file" style="display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">No file selected</span>
+        </div>
+    `;
+    container.appendChild(toast);
+    toast.offsetHeight;
+    toast.classList.add('show');
+
+    const titleEl = toast.querySelector('.toast-title');
+    const percentEl = toast.querySelector('.toast-percent');
+    const fillEl = toast.querySelector('.toast-progress-fill');
+    const fileEl = toast.querySelector('.current-file');
+
+    return {
+        update: (percent) => {
+            const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
+            percentEl.textContent = `${safePercent}%`;
+            fillEl.style.width = `${safePercent}%`;
+        },
+        updateFile: (fileName) => {
+            fileEl.textContent = fileName || 'No file selected';
+        },
+        finish: (successMessage = 'Upload complete!', autoCloseMs = 3000) => {
+            titleEl.textContent = successMessage;
+            percentEl.textContent = '\u2713';
+            fillEl.style.width = '100%';
+            fillEl.style.background = 'green';
+            setTimeout(() => {
+                toast.classList.remove('show');
+                toast.addEventListener('transitionend', () => toast.remove());
+            }, autoCloseMs);
+        },
+        error: (errorMessage = 'Upload failed') => {
+            titleEl.textContent = errorMessage;
+            percentEl.textContent = '\u2713';
+            fillEl.style.background = 'red';
+            setTimeout(() => {
+                toast.classList.remove('show');
+                toast.addEventListener('transitionend', () => toast.remove());
+            }, 5000);
+        },
+    };
+}
+
 /******************************/
 
 function ui_toggleDropdown(elemId) {

@@ -110,9 +110,9 @@ async function e2ee_armWorker(keyInput) {
 }
 
 // Helper function to upload a file that has already been selected
-async function __e2ee_uploadFile(file, crumbs) {
+async function __e2ee_uploadFile(file, crumbs, createToast=true) {
     // Stream the encrypted file to the server
-    const childData = await e2ee_uploadFileChunked(file);
+    const childData = await e2ee_uploadFileChunked(file, createToast);
 
     // Update the Merkle Tree
     const newChildName = file.customName || file.name;
@@ -206,7 +206,7 @@ async function e2ee_downloadFile(hash, decryptKey, filename) {
 }
 
 // Encrypt and upload a file in 5MB chunks
-async function e2ee_uploadFileChunked(file) {
+async function e2ee_uploadFileChunked(file, createToast=true) {
     // Ease-of-use constants
     const CHUNK_SIZE = 5 * 1024 * 1024;
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
@@ -225,7 +225,9 @@ async function e2ee_uploadFileChunked(file) {
     let finalHexHash;
 
     // Create a sticky toast for progress tracking
-    const progressToast = ui_createProgressToast(file.name);
+    let progressToast = null;
+    if (createToast)
+        progressToast = ui_createProgressToast(file.name);
 
     // For each chunk of the file...
     for (let i = 0; i < totalChunks; i++) {
@@ -296,15 +298,18 @@ async function e2ee_uploadFileChunked(file) {
             body: formData,
         });
         if (!res.ok) {
-            progressToast.error('Upload failed');
+            if (progressToast)
+                progressToast.error('Upload failed');
             throw new Error(`Failed to upload chunk ${i} of ${file.name}`);
         } else {
-            progressToast.update((start / file.size) * 100);
+            if (progressToast)
+                progressToast.update((start / file.size) * 100);
         }
     }
 
     // Upload finished
-    progressToast.finish('Upload successful!');
+    if (progressToast)
+        progressToast.finish('Upload successful!');
 
     // Return the hash hex and base64 key
     const rawKey = await crypto.subtle.exportKey('raw', cryptoKey);
@@ -365,7 +370,7 @@ async function e2ee_uploadFolder(crumbs) {
 
         const firstFile = files[0];
         const folderName = firstFile.webkitRelativePath.split('/')[0];
-        const folderProgressToast = ui_createProgressToast(folderName);
+        const folderProgressToast = ui_createFolderProgressToast(folderName);
 
         try {
             // Get the total size of all files
@@ -374,7 +379,9 @@ async function e2ee_uploadFolder(crumbs) {
 
             let uploadedSize = 0;
             for (let i = 0; i < files.length; i++) {
+                // Update the progress UI
                 const file = files[i];
+                folderProgressToast.updateFile(file.name);
 
                 // Parse the path of the file
                 const pathParts = file.webkitRelativePath.split('/');
@@ -407,7 +414,7 @@ async function e2ee_uploadFolder(crumbs) {
                 Object.defineProperty(file, 'customName', { value: actualFileName });
 
                 // Upload and update
-                await __e2ee_uploadFile(file, currentCrumbs);
+                await __e2ee_uploadFile(file, currentCrumbs, createToast=false);
                 uploadedSize += file.size;
                 folderProgressToast.update((uploadedSize / totalSize) * 100);
             }
