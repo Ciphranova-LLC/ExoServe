@@ -36,12 +36,22 @@
     }
 }
 
-.context-item:first-child { border-radius: 8px 8px 0 0; }
-.context-item:last-child { border-radius: 0 0 8px 8px; }
-.context-item:hover { background-color: var(--bg-light-hover); }
+.context-item:first-child {
+    border-radius: 8px 8px 0 0;
+}
+.context-item:last-child {
+    border-radius: 0 0 8px 8px;
+}
+.context-item:hover {
+    background-color: var(--bg-light-hover);
+}
 
-.context-item.text-danger { color: #ff5555; }
-.context-item.text-danger:hover { background-color: rgba(255, 85, 85, 0.1); }
+.context-item.text-danger {
+    color: #ff5555;
+}
+.context-item.text-danger:hover {
+    background-color: rgba(255, 85, 85, 0.1);
+}
 
 .context-divider {
     border: none;

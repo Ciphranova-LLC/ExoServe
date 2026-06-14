@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width" />
+        <title>{% block title %}ExoServe{% endblock %}</title>
+        <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" />
+
+        <link href="{{ url_for('static', filename='css/variables.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/custom.css') }}" rel="stylesheet" />
+
+        <link href="{{ url_for('static', filename='css/login.css') }}" rel="stylesheet" />
+
+        <script src="{{ url_for('static', filename='js/key-handler.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/login.js') }}" defer></script>
+    </head>
+
+    <body>
+        <!-- Hero Logo -->
+        <div class="hero-logo">
+            <a href="/#">
+                <img src="static/img/logo.png" alt="Product Name Logo" />
+            </a>
+        </div>
+
+        <!-- Main Page Layout -->
+        <div class="page-layout">
+            <!-- Login Box -->
+            <div class="login-wrapper">
+                <div class="login-box">
+                    <img src="static/img/favicon.png" alt="Logo" class="login-logo" />
+                    <h1 class="login-title">Sign up</h1>
+
+                    <label class="login-label" for="username">Username</label>
+                    <input type="text" id="username" class="login-input" placeholder="" />
+
+                    <label class="login-label" for="password">Password</label>
+                    <input type="password" id="password" class="login-input" placeholder="" />
+
+                    <label class="login-label" for="password">Confirm password</label>
+                    <input type="password" id="confirm" class="login-input" placeholder="" />
+
+                    <button class="login-button" onclick="login_register()">Sign up</button>
+                    <div
+                        class="login-signup"
+                        id="status"
+                        style="align-self: center; margin-top: 24px"
+                    >
+                        placeholder
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer Text -->
+            <div class="info-footer">
+                <div class="info-version">
+                    <a href="https://exoserve.ciphranova.com" target="_blank">ExoServe v1.0</a>
+                </div>
+                <div class="info-copyright">
+                    Owned by <a href="https://ciphranova.com" target="_blank">Ciphranova LLC</a>
+                </div>
+            </div>
+        </div>
+    </body>
+</html>

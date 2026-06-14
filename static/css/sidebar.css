@@ -5,7 +5,7 @@
     align-items: center;
     text-align: center;
 
-    & > :not(.button,hr) {
+    & > :not(.button, hr) {
         padding-top: 30px;
         padding-bottom: 10px;
     }

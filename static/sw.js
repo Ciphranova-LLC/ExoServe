@@ -87,7 +87,7 @@ async function decryptWhole(cleanServerUrl, clientId, filename) {
 
     // Calculate how many chunks there are to process
     const totalChunks = Math.ceil(eData.byteLength / CHUNK_E_SIZE);
-    
+
     // Arrays to hold the stitched data
     const decryptedChunks = [];
     let totalPlaintextSize = 0;
@@ -110,7 +110,7 @@ async function decryptWhole(cleanServerUrl, clientId, filename) {
             activeDecryptionKey,
             chunkCiphertext
         );
-        
+
         decryptedChunks.push(new Uint8Array(plainChunk));
         totalPlaintextSize += plainChunk.byteLength;
     }
@@ -138,7 +138,7 @@ async function decryptWhole(cleanServerUrl, clientId, filename) {
     }
 
     // Hint to garbage collector and return
-    decryptedChunks.length = 0; 
+    decryptedChunks.length = 0;
     return new Response(finalData, { headers });
 }
 
@@ -148,10 +148,18 @@ async function handleDecryption(request, clientId) {
     const ext = (urlObj.searchParams.get('ext') || urlObj.pathname.split('.').pop()).toLowerCase();
     const isVideo = ['mp4', 'webm', 'ogg'].includes(ext);
 
-    // Strip query parameters to prevent metadata leak to server
-    // NOTE: Streamed chunks reveals it's a video... so this is kind of unnecessary
-    const cleanServerUrl = urlObj.origin + urlObj.pathname;
+    // Get the file name before stripping
     const filename = urlObj.searchParams.get('filename');
+
+    // Strip parameters that leak metadata
+    urlObj.searchParams.delete('filename');
+    urlObj.searchParams.delete('ext');
+
+    // Craft the clean URL
+    const cleanServerUrl =
+        urlObj.origin +
+        urlObj.pathname +
+        (urlObj.searchParams.toString() ? '?' + urlObj.searchParams.toString() : '');
 
     // Wholly decrypt non-video
     if (!isVideo) {

@@ -67,10 +67,6 @@ function ui_initNewFolderModal() {
 }
 
 function ui_showNewFolderModal() {
-    if (!sessionStorage.getItem('key_uuid')) {
-        ui_showToast('Key not set');
-        return;
-    }
     const dialog = document.getElementById('modal-newfolder');
     const input = document.getElementById('newfolder-name');
     dialog.showModal();
@@ -90,16 +86,12 @@ function ui_submitNewFolderModal() {
 
     const crumbs = Array.from(document.querySelectorAll('.crumb'));
 
-    e2ee_newFolder((isRoot = false), (folderName = chosenName), crumbs).then((_) => dialog.close());
+    e2ee_newFolder(null, (folderName = chosenName), crumbs).then((_) => dialog.close());
 }
 
 /******************************/
 
 function ui_showYesNoModal(question) {
-    if (!sessionStorage.getItem('key_uuid')) {
-        ui_showToast('Key not set');
-        return;
-    }
     const dialog = document.getElementById('modal-yesno');
     document.getElementById('yesno-question').innerHTML = question + activeContextNode.name + '?';
     dialog.showModal();
@@ -140,16 +132,20 @@ function ui_initRenameNodeModal() {
 }
 
 function ui_showRenameNodeModal() {
-    if (!sessionStorage.getItem('key_uuid')) {
-        ui_showToast('Key not set');
-        return;
-    }
     const dialog = document.getElementById('modal-renamenode');
     const input = document.getElementById('renamenode-name');
     document.getElementById('renamenode-prompt').innerHTML = `Rename "${activeContextNode.name}"`;
     input.value = activeContextNode.name;
     dialog.showModal();
     input.focus();
+
+    const name = activeContextNode.name;
+    const lastDotIndex = name.lastIndexOf('.');
+    if (lastDotIndex > 0) {
+        input.setSelectionRange(0, lastDotIndex);
+    } else {
+        input.select();
+    }
 }
 
 function ui_closeRenameNodeModal() {
@@ -172,36 +168,38 @@ function ui_submitRenameNodeModal() {
     const crumbs = Array.from(document.querySelectorAll('.crumb'));
     const parentCrumb = crumbs[crumbs.length - 1];
 
-    e2ee_fetchFolder(parentCrumb.getAttribute('data-hash'), parentCrumb.getAttribute('data-key'))
-        .then((parentFolder) => {
-            // Ensure the item exists and the new name won't overwrite something else
-            if (!(oldName in parentFolder.children)) {
-                throw new Error('Item not found in directory.');
-            }
-            if (newName in parentFolder.children) {
-                throw new Error('Name collision.');
-            }
+    e2ee_parseKey(KeyType.B64, parentCrumb.getAttribute('data-key')).then((keyObj) => {
+        e2ee_fetchFolder(parentCrumb.getAttribute('data-hash'), keyObj)
+            .then((parentFolder) => {
+                // Ensure the item exists and the new name won't overwrite something else
+                if (!(oldName in parentFolder.children)) {
+                    throw new Error('Item not found in directory.');
+                }
+                if (newName in parentFolder.children) {
+                    throw new Error('Name collision.');
+                }
 
-            // Extract the metadata
-            const itemMetadata = parentFolder.children[oldName];
+                // Extract the metadata
+                const itemMetadata = parentFolder.children[oldName];
 
-            // Update the merkle tree
-            return e2ee_walkMerkleTree(crumbs, newName, itemMetadata, false, oldName);
-        })
-        .then(() => {
-            input.value = '';
-            dialog.close();
-            __e2ee_refreshTableView(crumbs);
-            ui_showToast(`Renamed to "${newName}"`);
-        })
-        .catch((err) => {
-            console.error('Failed to rename node:', err);
-            if (err.message === 'Name collision.') {
-                alert('A file or folder with that name already exists');
-            } else {
-                ui_showToast(`Failed to rename ${oldName}`);
-            }
-        });
+                // Update the merkle tree
+                return e2ee_walkMerkleTree(crumbs, newName, itemMetadata, false, oldName);
+            })
+            .then(() => {
+                input.value = '';
+                dialog.close();
+                __e2ee_refreshTableView(crumbs);
+                ui_showToast(`Renamed to "${newName}"`);
+            })
+            .catch((err) => {
+                console.error('Failed to rename node:', err);
+                if (err.message === 'Name collision.') {
+                    alert('A file or folder with that name already exists');
+                } else {
+                    ui_showToast(`Failed to rename ${oldName}`);
+                }
+            });
+    });
 }
 
 /******************************/
@@ -211,18 +209,16 @@ function ui_triggerDownload() {
     const contextMenu = document.getElementById('context-menu');
     contextMenu.classList.remove('active');
 
-    if (!sessionStorage.getItem('key_uuid')) {
-        ui_showToast('Key not set');
-        return;
-    }
     if (!activeContextNode) return;
 
     // Only support file downloads for now
     if (activeContextNode.type === 'file') {
         ui_showToast(`Downloading ${activeContextNode.name}...`);
-        e2ee_downloadFile(activeContextNode.hash, activeContextNode.key, activeContextNode.name);
+        e2ee_parseKey(KeyType.B64, activeContextNode.key).then((keyObj) =>
+            e2ee_downloadFile(activeContextNode.hash, keyObj, activeContextNode.name)
+        );
     } else {
-        ui_showToast('Folder downloads not current supported.');
+        ui_showToast('Folder downloads not currently supported.');
     }
 }
 
@@ -387,20 +383,12 @@ function ui_toggleDropdown(elemId) {
 /******************************/
 
 function ui_triggerFileUpload() {
-    if (!sessionStorage.getItem('key_uuid')) {
-        ui_showToast('Key not set');
-        return;
-    }
     const crumbs = Array.from(document.querySelectorAll('.crumb'));
     ui_toggleDropdown('dropdown-upload');
     e2ee_uploadFile(crumbs);
 }
 
 function ui_triggerFolderUpload() {
-    if (!sessionStorage.getItem('key_uuid')) {
-        ui_showToast('Key not set');
-        return;
-    }
     const crumbs = Array.from(document.querySelectorAll('.crumb'));
     ui_toggleDropdown('dropdown-upload');
     e2ee_uploadFolder(crumbs);

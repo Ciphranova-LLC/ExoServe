@@ -3,4 +3,4 @@
 uploads/*
 !uploads
 !uploads/.gitkeep
-roots.db*
+users.db*

@@ -1,18 +1,30 @@
 #!/usr/bin/env python3
+import hmac
 import hashlib
 import json
 import os
 import re
-import uuid
+
+from base64 import b64encode, b64decode
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.backends import default_backend
 from datetime import datetime
 from flask import (
     Flask, jsonify, redirect, render_template, request,
     send_file, send_from_directory, session, url_for
 )
 from pathlib import Path
-from src.filesystem import KVDatabase, new_file, read_file, delete_file, unstage_file
+from secrets import token_bytes
+from time import time, sleep
+from uuid import UUID
+
+from src.filesystem import ExoDatabase, delete_file, new_file, unstage_file
 from src.uploadstate import load_upload_state, save_upload_state
 
+
+# Environment variable for dummy data
+SERVER_SECRET = os.environ.get('ZERO_KNOWLEDGE_SECRET', 'CHANGE-THIS-IN-PROD')
 
 # Ports to bind to for development server
 IP_ADDRESS = '0.0.0.0'
@@ -22,21 +34,11 @@ HTTPS_PORT = 8000
 HERE = Path(__file__).parent
 UPLOAD_FOLDER = HERE / 'uploads'
 STAGING_FOLDER = UPLOAD_FOLDER / 'staging'
-ROOT_DATABASE = KVDatabase(HERE / 'roots.db')
+EXO_DATABASE = ExoDatabase(HERE / 'users.db')
 
 # Create the Flask app
 app = Flask(__name__)
 app.secret_key = os.urandom(32)
-
-
-@app.route('/')
-def serve_index():
-    return redirect('home')
-
-
-@app.route('/home')
-def serve_home():
-    return render_template('home.html')
 
 
 @app.route('/sw.js')
@@ -44,56 +46,175 @@ def serve_sw():
     return send_from_directory('static', 'sw.js', mimetype='application/javascript')
 
 
-@app.route('/set-uuid', methods=['POST'])
-def set_uuid():
-    # Get the UUID from the request
+@app.route('/')
+def serve_index():
+    return redirect('login')
+
+
+@app.route('/home')
+def serve_home():
+    return render_template('home.html')
+
+
+@app.route('/login')
+def serve_login():
+    return render_template('login.html')
+
+
+@app.route('/signup')
+def serve_signup():
+    return render_template('signup.html')
+
+
+@app.route('/register', methods=['POST'])
+def serve_register():
+    # Pull the user information from the body
     data = request.get_json()
-    raw_uuid = data.get('uuid')
+    uuid = data.get('uuid')
+    salt = data.get('salt')
+    pubkey = data.get('public_key')
+    privkey = data.get('private_key')
+
+    # Validate the UUID format (mitigates sandbox breaks later on)
+    try: _ = str(UUID(uuid))
+    except: return '', 400
+
+    # Save the user information if the UUID is not already reserved
+    if not EXO_DATABASE.create_user(uuid, salt, pubkey, privkey['data'], privkey['iv']):
+        return '', 400
+
+    # Return OK
+    return '', 200
+
+
+@app.route('/auth/challenge', methods=['POST'])
+def auth_challenge():
+    # Pull the user information from the body
+    data = request.get_json()
+    uuid = data.get('uuid')
+
+    # Get the user data from the database
+    user_row = EXO_DATABASE.get_key_material(uuid)
+
+    # Generate and register a true random nonce
+    nonce = token_bytes(32)
+    nonce_hash = hashlib.sha256(nonce).hexdigest()
+    EXO_DATABASE.add_nonce(nonce_hash, int(time()))
+
+    # No such user exists, use deterministic dummy data
+    if user_row is None:
+        user_row = generate_dummy_user_row(uuid)
+
+    # Send the response
+    return jsonify({
+        'salt': user_row['salt'],
+        'privkey': user_row['privkey'],
+        'iv': user_row['iv'],
+        'nonce': b64encode(nonce).decode('utf-8'),
+    }), 200
+
+
+@app.route('/auth/submit', methods=['POST'])
+def auth_submit():
+    # Pull the user information from the body
+    data = request.get_json()
+    uuid = data.get('uuid')
+    nonce = data.get('nonce')
+    signature = data.get('signature')
+
+    # Validate the nonce has not expired
+    nonce = b64decode(nonce)
+    nonce_hash = hashlib.sha256(nonce).hexdigest()
+    if not EXO_DATABASE.consume_nonce(nonce_hash):
+        return '', 400
+
+    # Get the user from the database
+    user_row = EXO_DATABASE.get_key_material(uuid)
+
+    # No such user exists, use deterministic dummy data
+    if user_row is None:
+        user_row = generate_dummy_user_row(uuid)
+
+    # Decode inputs
+    signature = b64decode(signature)
+    pubkey_pem = f'-----BEGIN PUBLIC KEY-----\n{user_row["pubkey"]}\n-----END PUBLIC KEY-----'
+
     try:
-        # Validate and set the UUID for the session
-        clean_uuid = str(uuid.UUID(raw_uuid))
-        session['key_uuid'] = clean_uuid
+        # Load the public key
+        public_key = serialization.load_pem_public_key(pubkey_pem.encode(), backend=default_backend())
 
-        # Define the sandbox directory
-        sandbox = UPLOAD_FOLDER / clean_uuid
+        # Verify the signature
+        public_key.verify(
+            signature,
+            nonce,
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+
+        # Generate an auth token for the session
+        token = EXO_DATABASE.generate_auth_token(uuid)
+
+        # Create the sandbox directory tree
+        sandbox = UPLOAD_FOLDER / uuid
         sandbox.mkdir(parents=False, exist_ok=True)
-        session['sandbox'] = str(sandbox)
-
-        # Define the staging directory within the sandbox
         staging = sandbox / 'staging'
         staging.mkdir(parents=False, exist_ok=True)
-        session['staging'] = str(staging)
-        for item in staging.iterdir():
-            if item.is_file():
-                item.unlink()
 
-        # If there is no root node, ask the client to send one
-        root_node_hash = ROOT_DATABASE.get_value(clean_uuid)
-        if root_node_hash is None:
-            return '', 204
-        else:
-            return root_node_hash, 200
+        # Return the auth token
+        return jsonify({
+            'uuid': uuid,
+            'token': token,
+        }), 200
 
-    # Something went wrong (probably the UUID format)
     except Exception as e:
-        print(e)
-        return 'Invalid UUID', 400
+        return f'', 400
+
+
+@app.route('/node', methods=['GET'])
+def route_get_node():
+    # Pull the user information from the parameters
+    uuid = request.args.get('uuid')
+    auth = request.args.get('auth')
+    checksum = request.args.get('hash')
+
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth):
+        return 'Unauthorized', 403
+    sandbox = UPLOAD_FOLDER / uuid
+
+    # If there is no checksum, assume the client wants the root checksum
+    if checksum is None:
+        root_hash = EXO_DATABASE.get_root_hash(uuid)
+        status = 200 if root_hash is not None else 204
+        return jsonify({
+            'root': root_hash,
+        }), status
+
+    # Create the shard path
+    # TODO: Possible attack vector... what if there is a bad checksum?
+    target_path = sandbox / checksum[0:2] / checksum[2:4] / checksum
+
+    # Return encrypted content
+    return send_file(target_path, as_attachment=False, conditional=True)
 
 
 @app.route('/node', methods=['POST'])
 def route_post_node():
-    # Validate a UUID is set
-    if 'key_uuid' not in session:
-        return '<h4>UUID not set</h4>', 403
+    # Pull the user information from the form
+    uuid = request.form['uuid']
+    auth = request.form['auth']
 
-    key_uuid = session['key_uuid']
-    sandbox = Path(session['sandbox'])
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth):
+        return 'Unauthorized', 403
+    sandbox = UPLOAD_FOLDER / uuid
+    staging = sandbox / 'staging'
 
     # Extract the request details and file payload
     details = json.loads(request.form['details'])
     file_obj = request.files.get('blob') or request.files.get('chunk')
     if not file_obj:
-        return 'No file payload provided', 400
+        return 'Missing file payload', 400
     payload_data = file_obj.read()
 
     # Determine if this is a chunked upload or a single-shot upload
@@ -103,15 +224,14 @@ def route_post_node():
     if is_chunked:
         # Extract chunk info
         realId = hashlib.sha256(details['id'].encode()).hexdigest()
-        staging_dir = Path(session['staging'])
-        staged_file = staging_dir / f'{realId}.part'
-        manifest = staging_dir / f"{realId}.json"
+        staged_file = staging / f'{realId}.part'
+        manifest = staging / f"{realId}.json"
 
         # Load and sanity check the current upload state
         state = load_upload_state(manifest)
         if details['chunk_index'] != state['index']:
             return 'Received chunks out of order', 403
-
+        
         # Append new data onto the target
         with staged_file.open('ab') as f:
             f.write(payload_data)
@@ -144,6 +264,7 @@ def route_post_node():
     else:
         # Uploading a whole file
         if 'checksum' not in details:
+            print('Missing checksum')
             return 'Missing checksum', 400
 
         final_checksum = details['checksum']
@@ -151,14 +272,13 @@ def route_post_node():
 
         # Using a standard return instead of assert to prevent 500 errors
         if final_checksum != shasum:
-            return "Integrity check fail", 403
-
+            return 'Integrity check fail', 403
         new_file(sandbox, final_checksum, payload_data)
 
     # The full node (single or chunked) is safely in the sandbox
-    # Create the new node, with special handling for the root node
+    # Update the database if modifying the root node
     if details.get('root'):
-        ROOT_DATABASE.upsert_value(key_uuid, final_checksum)
+        EXO_DATABASE.upsert_root_hash(uuid, final_checksum)
 
     # Delete the stale node if it exists
     if 'stale' in details:
@@ -167,43 +287,53 @@ def route_post_node():
     return jsonify({"status": "success"}), 200
 
 
-@app.route('/node/<checksum>', methods=['GET'])
-def route_get_node(checksum):
-    # Validate a UUID is set
-    if 'key_uuid' not in session:
-        return '<h4>UUID not set</h4>', 403
-    key_uuid = session['key_uuid']
-    sandbox = Path(session['sandbox'])
+@app.route('/node', methods=['DELETE'])
+def route_delete_node():
+    # Pull the user information from the form
+    uuid = request.args.get('uuid')
+    auth = request.args.get('auth')
+    checksum = request.args.get('hash')
 
-    # Determine which checksum to load
-    if checksum == 'root':
-        actual_checksum = ROOT_DATABASE.get_value(key_uuid)
-    else:
-        actual_checksum = checksum
-
-    # Create the shard path
-    target_path = sandbox / actual_checksum[0:2] / actual_checksum[2:4] / actual_checksum
-
-    # Return encrypted content
-    return send_file(target_path, as_attachment=False, conditional=True)
-
-
-@app.route('/node/<checksum>', methods=['DELETE'])
-def route_delete_node(checksum):
-    # Validate a UUID is set
-    if 'key_uuid' not in session:
-        return '<h4>UUID not set</h4>', 403
-    sandbox = Path(session['sandbox'])
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth):
+        return 'Unauthorized', 403
+    sandbox = UPLOAD_FOLDER / uuid
 
     # Determine which checksum to delete
     if checksum == 'root':
         return '', 403
-    else:
-        actual_checksum = checksum
 
-    delete_file(sandbox, actual_checksum)
+    # TODO: Possible attack vector... what if there is a bad checksum?
+    delete_file(sandbox, checksum)
     return '', 204
 
+
+def generate_dummy_user_row(uuid):
+    # Use a thread-safe PRNG engine
+    seed = hmac.new(
+        SERVER_SECRET.encode(), 
+        uuid.encode(), 
+        hashlib.sha256
+    ).digest()
+
+    # Helper function to generate the bytes
+    def expand(key, length):
+        result = b''
+        counter = 0
+        while len(result) < length:
+            counter += 1
+            result += hashlib.sha256(key + str(counter).encode()).digest()
+        return result[:length]
+
+    # Return the object
+    return {
+        'uuid': '00000000-0000-0000-0000-000000000000',
+        'salt': b64encode(expand(seed, 16)).decode('utf-8'),
+        'pubkey': b64encode(expand(seed, 392)).decode('utf-8'),
+        'privkey': b64encode(expand(seed, 1644)).decode('utf-8'),
+        'iv': b64encode(expand(seed, 12)).decode('utf-8'),
+        'nonce': b64encode(expand(seed, 32)).decode('utf-8'),
+    }
 
 # Start the HTTP development server
 def run_http():

@@ -3,43 +3,6 @@ const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg'];
 
 let currBlobUrl = null;
 
-// Global IndexedDB handler for securely storing CryptoKey objects
-const keyDB = {
-    async _getStore(mode) {
-        return new Promise((resolve, reject) => {
-            const req = indexedDB.open('e2ee-store', 1);
-            req.onupgradeneeded = (e) => e.target.result.createObjectStore('keys');
-            req.onsuccess = (e) =>
-                resolve(e.target.result.transaction('keys', mode).objectStore('keys'));
-            req.onerror = () => reject(req.error);
-        });
-    },
-    async setActiveKey(cryptoKey) {
-        const store = await this._getStore('readwrite');
-        return new Promise((resolve, reject) => {
-            const req = store.put(cryptoKey, 'active_crypto_key');
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-        });
-    },
-    async getRootKey() {
-        const store = await this._getStore('readonly');
-        return new Promise((resolve, reject) => {
-            const req = store.get('master_root_key');
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
-        });
-    },
-    async setRootKey(cryptoKey) {
-        const store = await this._getStore('readwrite');
-        return new Promise((resolve, reject) => {
-            const req = store.put(cryptoKey, 'master_root_key');
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-        });
-    },
-};
-
 // Global lock for the Merkle tree within the same session
 class MerkleMutex {
     constructor() {
@@ -81,36 +44,8 @@ function escapeHtml(str) {
     );
 }
 
-// Parse the key in memory
-async function e2ee_parseKey(keyInput) {
-    // Intercept UI flags for the root folder
-    if (keyInput === 'ROOT' || keyInput === null || keyInput === 'null') {
-        return await keyDB.getRootKey();
-    }
-
-    // If we are passing a base64 string from the Merkle tree metadata
-    else if (typeof keyInput === 'string') {
-        const raw = Uint8Array.from(atob(keyInput), (c) => c.charCodeAt(0));
-        return await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, [
-            'encrypt',
-            'decrypt',
-        ]);
-    }
-
-    // Returned the parsed key
-    return keyInput;
-}
-
-// Convert a base64 key, handle the ROOT flag, or accept a CryptoKey directly
-async function e2ee_armWorker(keyInput) {
-    const cryptoKey = await e2ee_parseKey(keyInput);
-    await keyDB.setActiveKey(cryptoKey);
-    await fetch('/arm-worker');
-    return cryptoKey;
-}
-
 // Helper function to upload a file that has already been selected
-async function __e2ee_uploadFile(file, crumbs, createToast=true) {
+async function __e2ee_uploadFile(file, crumbs, createToast = true) {
     // Stream the encrypted file to the server
     const childData = await e2ee_uploadFileChunked(file, createToast);
 
@@ -139,7 +74,8 @@ async function __e2ee_ensureFolderExists(folderName, crumbs) {
         const parentKey = parentCrumb.getAttribute('data-key');
 
         // Fetch and decrypt the parent folder contents
-        const parentFolder = await e2ee_fetchFolder(parentHash, parentKey);
+        const keyObj = await e2ee_parseKey(KeyType.B64, parentKey);
+        const parentFolder = await e2ee_fetchFolder(parentHash, keyObj);
 
         // If the item already exists and is a folder, return its details
         const existingItem = parentFolder.children ? parentFolder.children[folderName] : null;
@@ -157,7 +93,7 @@ async function __e2ee_ensureFolderExists(folderName, crumbs) {
         }
 
         // Else, create a new empty folder
-        const newFolderData = await e2ee_newFolder(false, folderName, crumbs, true);
+        const newFolderData = await e2ee_newFolder(null, folderName, crumbs, true);
 
         // Update the parent crumb
         parentCrumb.setAttribute('data-hash', newFolderData.parentHash);
@@ -184,19 +120,63 @@ function __e2ee_refreshTableView(crumbs) {
             document.body.contains(activeCrumb) &&
             activeCrumb.nextElementSibling === null;
         if (isActiveFolder) {
-            filetable_goToFolder(finalHash, finalKey, finalName, false);
+            e2ee_parseKey(KeyType.B64, finalKey).then((keyObj) =>
+                filetable_goToFolder(finalHash, keyObj, finalName, false)
+            );
         }
         treeLock.release();
     });
 }
 
+// Arm the service worker with a key
+async function e2ee_armWorker(keyObj) {
+    await keyDB.setActiveKey(keyObj);
+    await fetch('/arm-worker');
+    return keyObj;
+}
+
+// Parse the key in memory
+async function e2ee_parseKey(keyType, data = null) {
+    // Master key
+    if (keyType === KeyType.ROOT) {
+        return await keyDB.getMasterKey();
+    }
+
+    // Generate a new random key
+    else if (keyType === KeyType.NEW) {
+        return await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
+            'encrypt',
+            'decrypt',
+        ]);
+    }
+
+    // Import a key from base64
+    else if (keyType === KeyType.B64) {
+        if (data === null || data === 'null') return await keyDB.getMasterKey();
+        const raw = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+        return await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, [
+            'encrypt',
+            'decrypt',
+        ]);
+    }
+
+    // Undefined
+    return null;
+}
+
 // Download a file to the client system
-async function e2ee_downloadFile(hash, decryptKey, filename) {
-    await e2ee_armWorker(decryptKey);
+async function e2ee_downloadFile(hash, keyObj, filename) {
+    await e2ee_armWorker(keyObj);
+
+    // Get session info
+    const uuid = sessionStorage.getItem('uuid');
+    const authToken = sessionStorage.getItem('auth_token');
+
+    // await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}`, { method: 'DELETE' });
 
     // Create an element to trigger the download manager
     const a = document.createElement('a');
-    a.href = `/node/${hash}?download=true&filename=${encodeURIComponent(filename)}`;
+    a.href = `/node?uuid=${uuid}&auth=${authToken}&hash=${hash}&download=true&filename=${encodeURIComponent(filename)}`;
     a.download = filename;
 
     // Click and cleanup
@@ -206,15 +186,13 @@ async function e2ee_downloadFile(hash, decryptKey, filename) {
 }
 
 // Encrypt and upload a file in 5MB chunks
-async function e2ee_uploadFileChunked(file, createToast=true) {
+async function e2ee_uploadFileChunked(file, createToast = true) {
     // Ease-of-use constants
     const CHUNK_SIZE = 5 * 1024 * 1024;
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-    // Generate a random encryption key and IV
-    const cryptoKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
-        'encrypt',
-    ]);
+    // Generate a random encryption key
+    const keyObj = await e2ee_parseKey(KeyType.NEW);
 
     // Generate a single 12-byte File IV
     const fileIv = crypto.getRandomValues(new Uint8Array(12));
@@ -226,8 +204,7 @@ async function e2ee_uploadFileChunked(file, createToast=true) {
 
     // Create a sticky toast for progress tracking
     let progressToast = null;
-    if (createToast)
-        progressToast = ui_createProgressToast(file.name);
+    if (createToast) progressToast = ui_createProgressToast(file.name);
 
     // For each chunk of the file...
     for (let i = 0; i < totalChunks; i++) {
@@ -255,7 +232,7 @@ async function e2ee_uploadFileChunked(file, createToast=true) {
         // Encrypt with AES-GCM (automatically appending a 16 byte Auth Tag)
         const encryptedChunk = await crypto.subtle.encrypt(
             { name: 'AES-GCM', iv: chunkIv },
-            cryptoKey,
+            keyObj,
             chunkBuffer
         );
 
@@ -291,6 +268,8 @@ async function e2ee_uploadFileChunked(file, createToast=true) {
         const formData = new FormData();
         formData.append('chunk', new Blob([payload], { type: 'application/octet-stream' }));
         formData.append('details', details);
+        formData.append('uuid', sessionStorage.getItem('uuid'));
+        formData.append('auth', sessionStorage.getItem('auth_token'));
 
         // Perform the upload
         const res = await fetch('/node', {
@@ -298,21 +277,18 @@ async function e2ee_uploadFileChunked(file, createToast=true) {
             body: formData,
         });
         if (!res.ok) {
-            if (progressToast)
-                progressToast.error('Upload failed');
+            if (progressToast) progressToast.error('Upload failed');
             throw new Error(`Failed to upload chunk ${i} of ${file.name}`);
         } else {
-            if (progressToast)
-                progressToast.update((start / file.size) * 100);
+            if (progressToast) progressToast.update((start / file.size) * 100);
         }
     }
 
     // Upload finished
-    if (progressToast)
-        progressToast.finish('Upload successful!');
+    if (progressToast) progressToast.finish('Upload successful!');
 
     // Return the hash hex and base64 key
-    const rawKey = await crypto.subtle.exportKey('raw', cryptoKey);
+    const rawKey = await crypto.subtle.exportKey('raw', keyObj);
     const keyBase64 = btoa(String.fromCharCode(...new Uint8Array(rawKey)));
     return {
         hash: finalHexHash,
@@ -322,12 +298,6 @@ async function e2ee_uploadFileChunked(file, createToast=true) {
 
 // Encrypt and upload one file to the server
 async function e2ee_uploadFile(crumbs) {
-    // Validate that there is a valid session
-    if (!sessionStorage.getItem('key_uuid')) {
-        alert('Key not set');
-        return;
-    }
-
     // Create a psuedo-element to select a file
     const input = document.createElement('input');
     input.type = 'file';
@@ -352,12 +322,6 @@ async function e2ee_uploadFile(crumbs) {
 
 // Encrypt and upload a folder to the server
 async function e2ee_uploadFolder(crumbs) {
-    // Validate that there is a valid session
-    if (!sessionStorage.getItem('key_uuid')) {
-        alert('Key not set');
-        return;
-    }
-
     // Create a psuedo-element to select a directory
     const input = document.createElement('input');
     input.type = 'file';
@@ -414,7 +378,7 @@ async function e2ee_uploadFolder(crumbs) {
                 Object.defineProperty(file, 'customName', { value: actualFileName });
 
                 // Upload and update
-                await __e2ee_uploadFile(file, currentCrumbs, createToast=false);
+                await __e2ee_uploadFile(file, currentCrumbs, (createToast = false));
                 uploadedSize += file.size;
                 folderProgressToast.update((uploadedSize / totalSize) * 100);
             }
@@ -436,19 +400,17 @@ async function e2ee_uploadFolder(crumbs) {
 
 // Encrypt a whole blob of data on the main thread
 // The data must be small, otherwise an OOM error will occur!
-async function e2ee_encryptWhole(data, keyInput) {
-    let key = await e2ee_parseKey(keyInput);
-
+async function e2ee_encryptWhole(data, keyObj) {
     // Encrypt
     const encodedData = new TextEncoder().encode(data);
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
-
     const encryptedBuffer = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv: iv },
-        key,
+        keyObj,
         encodedData
     );
 
+    // Prepend IV
     const ciphertext = new Uint8Array(encryptedBuffer);
     const combinedData = new Uint8Array(12 + ciphertext.length);
     combinedData.set(iv, 0);
@@ -461,7 +423,7 @@ async function e2ee_encryptWhole(data, keyInput) {
         .map((byte) => byte.toString(16).padStart(2, '0'))
         .join('');
 
-    // Return the pair of data and its hash
+    // Return the data and its hash
     return {
         data: combinedData,
         hash: hashHex,
@@ -469,21 +431,13 @@ async function e2ee_encryptWhole(data, keyInput) {
 }
 
 // Fetch a folder from the server
-async function e2ee_fetchFolder(id = '', decryptKey = null) {
-    // Validate that there is a valid session
-    if (!sessionStorage.getItem('key_uuid')) {
-        alert('Key not set');
-        return;
-    }
-
-    // Parse the key into memory
-    if (decryptKey == null) decryptKey = 'ROOT';
-    const cryptoKey = await e2ee_parseKey(decryptKey);
-
-    const targetId = id === null || id.length === 0 ? 'root' : id;
+async function e2ee_fetchFolder(id, keyObj, data = null) {
+    // Get the Session Storage items
+    const uuid = sessionStorage.getItem('uuid');
+    const authToken = sessionStorage.getItem('auth_token');
 
     // Fetch raw bytes
-    const res = await fetch(`/node/${targetId}?raw=true`);
+    const res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${id}&raw=true`);
     if (!res.ok) throw new Error('Failed to fetch folder from server');
 
     // Decrypt in the main thread
@@ -493,7 +447,7 @@ async function e2ee_fetchFolder(id = '', decryptKey = null) {
 
     const decryptedBuffer = await window.crypto.subtle.decrypt(
         { name: 'AES-GCM', iv: iv },
-        cryptoKey,
+        keyObj,
         dataToDecrypt
     );
 
@@ -503,34 +457,18 @@ async function e2ee_fetchFolder(id = '', decryptKey = null) {
 
 // Upload a new, empty folder to the server
 async function e2ee_newFolder(
-    isRoot = false,
-    folderName = 'NewFolder',
+    keyObj = null,
+    folderName = 'New Folder',
     crumbs = [],
     hasLock = false
 ) {
-    // Validate that there is a valid session
-    if (!sessionStorage.getItem('key_uuid')) {
-        alert('Key not set');
-        return;
-    }
+    // Generate a random key or get the root key
+    const isRoot = keyObj !== null;
+    if (!isRoot) keyObj = await e2ee_parseKey(KeyType.NEW);
 
-    // Only the root is encrypted with the session key
-    let encryptKeyInput;
-    let encryptKeyBase64 = null;
-
-    if (isRoot) {
-        encryptKeyInput = 'ROOT';
-        encryptKeyBase64 = 'ROOT';
-    } else {
-        const rawKey = await crypto.subtle
-            .generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt'])
-            .then((key) => crypto.subtle.exportKey('raw', key));
-        encryptKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(rawKey)));
-        encryptKeyInput = encryptKeyBase64;
-    }
-
+    // Create and encrypt the folder
     const jsonString = JSON.stringify({ type: 'folder', children: {} });
-    const combinedData = await e2ee_encryptWhole(jsonString, encryptKeyInput);
+    const combinedData = await e2ee_encryptWhole(jsonString, keyObj);
 
     // Create the upload details
     let details = JSON.stringify({
@@ -542,12 +480,21 @@ async function e2ee_newFolder(
     const formData = new FormData();
     formData.append('blob', new Blob([combinedData['data']], { type: 'application/octet-stream' }));
     formData.append('details', details);
+    formData.append('uuid', sessionStorage.getItem('uuid'));
+    formData.append('auth', sessionStorage.getItem('auth_token'));
 
     // Make request to create the new folder
     await fetch('/node', {
         method: 'POST',
         body: formData,
     });
+
+    // Extract the key if using a random key, destroying the object
+    let keyBase64 = null;
+    if (!isRoot) {
+        const keyRaw = await crypto.subtle.exportKey('raw', keyObj);
+        keyBase64 = btoa(String.fromCharCode(...new Uint8Array(keyRaw)));
+    }
 
     // Update the Merkle Tree
     let newParentHash = null;
@@ -557,7 +504,7 @@ async function e2ee_newFolder(
             type: 'folder',
             size: 0,
             hash: combinedData['hash'],
-            key: encryptKeyBase64,
+            key: keyBase64,
         };
         newParentHash = await e2ee_walkMerkleTree(crumbs, folderName, childMetadata, hasLock);
         __e2ee_refreshTableView(crumbs);
@@ -566,20 +513,19 @@ async function e2ee_newFolder(
     // Return the hash of the new folder
     return {
         hash: combinedData['hash'],
-        key: encryptKeyBase64,
+        key: keyBase64,
         parentHash: newParentHash,
     };
 }
 
 // Download, decrypt, and preview a file
 async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
-    // Validate that there is a valid session
-    if (!sessionStorage.getItem('key_uuid')) {
-        alert('Key not set');
-        return;
-    }
-
+    // Arm the service worker
     await e2ee_armWorker(decryptKey);
+
+    // Get the Session Storage items
+    const uuid = sessionStorage.getItem('uuid');
+    const authToken = sessionStorage.getItem('auth_token');
 
     // Initialize the nested HTML
     let html = `<h2>${filename}</h2>`;
@@ -590,7 +536,7 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
 
         // Streaming from service worker for videos
         if (VIDEO_EXTENSIONS.includes(ext)) {
-            const videoUrl = `/node/${hash}?ext=${ext}`;
+            const videoUrl = `/node?uuid=${uuid}&auth=${authToken}&hash=${hash}&ext=${ext}`;
             html += `<video id="preview-content" controls>
                     <source src="${videoUrl}" type="video/${ext}"></video>`;
         }
@@ -598,7 +544,7 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
         // Whole-file from service worker for everything else
         else {
             // Download
-            const res = await fetch(`/node/${hash}`);
+            const res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}`);
             if (!res.ok) {
                 const errorBody = await res.text();
                 throw new Error(errorBody || `HTTP Error ${res.status}: Download failed`);
@@ -670,13 +616,15 @@ async function e2ee_walkMerkleTree(
             const parentKeyBase64 = crumb.getAttribute('data-key');
 
             // Fetch the parent folder
-            const parent = await e2ee_fetchFolder(parentHash, parentKeyBase64);
+            const keyObj = await e2ee_parseKey(KeyType.B64, parentKeyBase64);
+            const parent = await e2ee_fetchFolder(parentHash, keyObj);
 
             // For the active directory, handle overwrites or deletions
             if (i === crumbs.length - 1 && currChildName in parent['children']) {
                 const oldChild = parent['children'][currChildName];
                 if (!currChildMetadata || oldChild['hash'] !== currChildMetadata['hash']) {
-                    await e2ee_deleteNode(oldChild['hash'], oldChild['type'], oldChild['key']);
+                    const childKeyObj = await e2ee_parseKey(KeyType.B64, oldChild['key']);
+                    await e2ee_deleteNode(oldChild['hash'], oldChild['type'], childKeyObj);
                 }
             }
 
@@ -705,7 +653,7 @@ async function e2ee_walkMerkleTree(
             }
 
             // Re-encrypt and re-hash the parent
-            const combinedData = await e2ee_encryptWhole(JSON.stringify(parent), parentKeyBase64);
+            const combinedData = await e2ee_encryptWhole(JSON.stringify(parent), keyObj);
             const newParentHash = combinedData['hash'];
             crumb.setAttribute('data-hash', newParentHash);
 
@@ -726,6 +674,8 @@ async function e2ee_walkMerkleTree(
                 new Blob([combinedData['data']], { type: 'application/octet-stream' })
             );
             formData.append('details', details);
+            formData.append('uuid', sessionStorage.getItem('uuid'));
+            formData.append('auth', sessionStorage.getItem('auth_token'));
             await fetch('/node', {
                 method: 'POST',
                 body: formData,
@@ -745,18 +695,21 @@ async function e2ee_walkMerkleTree(
 }
 
 // Recursively delete files from the server
-async function e2ee_deleteNode(hash, type, decryptKey) {
+async function e2ee_deleteNode(hash, type, keyObj) {
     // Validate that there is a hash
     if (!hash) return;
 
     // Folders must be recursed
     if (type === 'folder') {
         try {
-            const folderData = await e2ee_fetchFolder(hash, decryptKey);
+            const folderData = await e2ee_fetchFolder(hash, keyObj);
             if (folderData && folderData.children) {
-                const deletePromises = Object.entries(folderData.children).map(([_, childMeta]) => {
-                    return e2ee_deleteNode(childMeta.hash, childMeta.type, childMeta.key);
-                });
+                const deletePromises = Object.entries(folderData.children).map(
+                    async ([_, childMeta]) => {
+                        const childKeyObj = await e2ee_parseKey(KeyType.B64, childMeta.key);
+                        return e2ee_deleteNode(childMeta.hash, childMeta.type, childKeyObj);
+                    }
+                );
                 await Promise.all(deletePromises);
             }
         } catch (e) {
@@ -765,7 +718,9 @@ async function e2ee_deleteNode(hash, type, decryptKey) {
     }
 
     // Delete the blob itself
-    await fetch(`/node/${hash}`, { method: 'DELETE' });
+    const uuid = sessionStorage.getItem('uuid');
+    const authToken = sessionStorage.getItem('auth_token');
+    await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}`, { method: 'DELETE' });
 }
 
 // Listen for messages from the Service Worker

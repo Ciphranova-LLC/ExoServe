@@ -1,97 +1,133 @@
-{% extends "base.html" %} {% block content %}
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width" />
+        <title>{% block title %}ExoServe{% endblock %}</title>
+        <link rel="icon" href="{{ url_for('static', filename='img/favicon.png') }}" />
 
-<!-- The main layout containing all elements-->
-<div class="layout-main">
-    <!-- Sidebar Menu -->
-    <nav class="sidebar-root">
-        <img src="static/img/favicon.png" />
+        <link href="{{ url_for('static', filename='css/variables.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/custom.css') }}" rel="stylesheet" />
 
-        <hr />
+        <link href="{{ url_for('static', filename='css/contextmenu.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/dropdown.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/file-table.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/modal.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/sidebar.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/toast.css') }}" rel="stylesheet" />
 
-        <div class="button" onclick="keyhandler_setSessionKey()" title="Set Key">
-            <img src="static/img/key-set.svg" />
-        </div>
+        <script src="{{ url_for('static', filename='js/breadcrumbs.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/carousel.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/e2ee.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/filetable.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/key-handler.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/ui.js') }}" defer></script>
+    </head>
 
-        <div class="button" onclick="keyhandler_generateAndDownloadKey()" title="Generate Key">
-            <img src="static/img/key-new.svg" />
-        </div>
+    <body>
+        <!-- The main layout containing all elements-->
+        <div class="layout-main">
+            <!-- Sidebar Menu -->
+            <nav class="sidebar-root">
+                <img src="static/img/favicon.png" />
 
-        <hr />
+                <hr />
 
-        <div class="button" onclick="" title="Trash">
-            <img src="static/img/trashcan.svg" />
-        </div>
-    </nav>
-
-    <!-- Nested layout to contain session-specific details -->
-    <main class="layout-session">
-        <!-- Search bar -->
-        <div class="area-search">
-            <input type="text" placeholder="Search..." />
-            <pre id="key-name">No key set</pre>
-        </div>
-
-        <!-- Interaction buttons -->
-        <div class="area-button">
-            <div class="dropdown-container" id="dropdown-upload">
-                <div class="button" onclick="ui_toggleDropdown('dropdown-upload')" title="Upload">
-                    <img src="static/img/arrow-up.svg" />
-                    Upload
+                <div class="button" onclick="keyhandler_setSessionKey()" title="Set Key">
+                    <img src="static/img/key-set.svg" />
                 </div>
-                <div class="dropdown-menu">
-                    <div class="dropdown-item" onclick="ui_triggerFileUpload()">
-                        <img src="static/img/upload-file.svg" />
-                        Upload File
-                    </div>
-                    <div class="dropdown-item" onclick="ui_triggerFolderUpload()">
-                        <img src="static/img/upload-folder.svg" />
-                        Upload Folder
-                    </div>
+
+                <div
+                    class="button"
+                    onclick="keyhandler_generateAndDownloadKey()"
+                    title="Generate Key"
+                >
+                    <img src="static/img/key-new.svg" />
                 </div>
-            </div>
 
-            <div class="button" onclick="ui_showNewFolderModal()" title="New folder">
-                <img src="static/img/new-folder.svg" />
-                New folder
-            </div>
-        </div>
+                <hr />
 
-        <!-- Breadcrumb -->
-        <div class="area-breadcrumb">
-            <nav class="breadcrumbs">
-                <ol id="breadcrumb-list"></ol>
+                <div class="button" onclick="" title="Trash">
+                    <img src="static/img/trashcan.svg" />
+                </div>
             </nav>
+
+            <!-- Nested layout to contain session-specific details -->
+            <main class="layout-session">
+                <!-- Search bar -->
+                <div class="area-search">
+                    <input type="text" placeholder="Search..." />
+                    <pre id="key-name">No key set</pre>
+                </div>
+
+                <!-- Interaction buttons -->
+                <div class="area-button">
+                    <div class="dropdown-container" id="dropdown-upload">
+                        <div
+                            class="button"
+                            onclick="ui_toggleDropdown('dropdown-upload')"
+                            title="Upload"
+                        >
+                            <img src="static/img/arrow-up.svg" />
+                            Upload
+                        </div>
+                        <div class="dropdown-menu">
+                            <div class="dropdown-item" onclick="ui_triggerFileUpload()">
+                                <img src="static/img/upload-file.svg" />
+                                Upload File
+                            </div>
+                            <div class="dropdown-item" onclick="ui_triggerFolderUpload()">
+                                <img src="static/img/upload-folder.svg" />
+                                Upload Folder
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="button" onclick="ui_showNewFolderModal()" title="New folder">
+                        <img src="static/img/new-folder.svg" />
+                        New folder
+                    </div>
+                </div>
+
+                <!-- Breadcrumb -->
+                <div class="area-breadcrumb">
+                    <nav class="breadcrumbs">
+                        <ol id="breadcrumb-list"></ol>
+                    </nav>
+                </div>
+
+                <!-- File table -->
+                <div class="area-files">
+                    <div class="file-table">
+                        <table class="table sortable-table">
+                            <thead>
+                                <tr>
+                                    <th id="header-checkbox" class="column-checkbox">
+                                        <input class="checkbox-header" type="checkbox" />
+                                    </th>
+                                    <th id="header-name">Name</th>
+                                    <th id="header-date">Date Added</th>
+                                    <th id="header-type">Type</th>
+                                    <th id="header-size">Size</th>
+                                </tr>
+                                <colgroup>
+                                    <col style="width: 5%" />
+                                    <col style="width: 55%" />
+                                    <col style="width: 20%" />
+                                    <col style="width: 10%" />
+                                    <col style="width: 10%" />
+                                </colgroup>
+                            </thead>
+                            <tbody id="file-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </main>
         </div>
 
-        <!-- File table -->
-        <div class="area-files">
-            <div class="file-table">
-                <table class="table sortable-table">
-                    <thead>
-                        <tr>
-                            <th id="header-checkbox" class="column-checkbox">
-                                <input class="checkbox-header" type="checkbox" />
-                            </th>
-                            <th id="header-name">Name</th>
-                            <th id="header-date">Date Added</th>
-                            <th id="header-type">Type</th>
-                            <th id="header-size">Size</th>
-                        </tr>
-                        <colgroup>
-                            <col style="width: 5%" />
-                            <col style="width: 55%" />
-                            <col style="width: 20%" />
-                            <col style="width: 10%" />
-                            <col style="width: 10%" />
-                        </colgroup>
-                    </thead>
-                    <tbody id="file-table-body"></tbody>
-                </table>
-            </div>
-        </div>
-    </main>
-</div>
-
-{% include "modals/contextmenu.html" %} {% include "modals/newfolder.html" %} {% include
-"modals/preview.html" %} {% include "modals/renamenode.html" %} {% include "modals/yesno.html" %} {%
-endblock %}
+        {% include "modals/contextmenu.html" %} {% include "modals/newfolder.html" %} {% include
+        "modals/preview.html" %} {% include "modals/renamenode.html" %} {% include
+        "modals/yesno.html" %}
+        <div id="toast-container" class="toast-container"></div>
+    </body>
+</html>

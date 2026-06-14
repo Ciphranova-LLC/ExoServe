@@ -171,10 +171,10 @@ function filetable_applyRowCheckboxesListeners() {
     });
 }
 
-function filetable_goToFolder(hash, key, name, updateBreadcrumbs = true) {
-    e2ee_fetchFolder((id = hash), (decryptKey = key)).then((folderJson) => {
+function filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs = true) {
+    e2ee_fetchFolder(hash, keyObj).then((folderJson) => {
         filetable_build(folderJson);
-        if (updateBreadcrumbs) breadcrumbs_append(hash, key, name);
+        if (updateBreadcrumbs) breadcrumbs_append(hash, keyObj, name);
     });
 }
 
@@ -182,7 +182,9 @@ function filetable_goToFolderElem(elem, updateBreadcrumbs = true) {
     const hash = elem.getAttribute('data-hash');
     const key = elem.getAttribute('data-key');
     const name = elem.getAttribute('data-name');
-    return filetable_goToFolder(hash, key, name, updateBreadcrumbs);
+    e2ee_parseKey(KeyType.B64, key).then((keyObj) =>
+        filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs)
+    );
 }
 
 document.addEventListener('DOMContentLoaded', () => {

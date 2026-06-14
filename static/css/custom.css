@@ -1,11 +1,11 @@
 @font-face {
     font-family: 'Wanafi Regular';
-    src: url("../fonts/Wanafi.ttf");
+    src: url('../fonts/Wanafi.ttf');
 }
 
-
 /* Over rides */
-body, html {
+body,
+html {
     font-family: 'Sans Serif';
     background-color: var(--bg-dark);
     width: 100%;
@@ -17,7 +17,7 @@ body, html {
 
 /* New elements */
 vr {
-    border-left:1px solid var(--border-color);
+    border-left: 1px solid var(--border-color);
     height: 66%;
 }
 
@@ -38,9 +38,10 @@ vr {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding-right:20px;
+    padding-right: 20px;
 }
-input[type=text] {
+input[type='text'],
+input[type='password'] {
     height: 40px;
     border-radius: 5px;
     border-color: var(--border-color-emph);
@@ -49,9 +50,10 @@ input[type=text] {
     color: var(--fg);
     padding-left: 15px;
     width: 50%;
+    box-sizing: border-box;
     min-width: 305px;
 }
-input:focus{
+input:focus {
     outline: none;
 }
 .area-search pre {
@@ -104,7 +106,7 @@ input:focus{
 
         &:not(:last-child)::after {
             margin: 0 12px;
-            content: "\203A";
+            content: '\203A';
             font-size: large;
         }
 

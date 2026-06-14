@@ -1,6 +1,15 @@
 let breadcrumb_elem = document.getElementById('breadcrumb-list');
 
-function breadcrumbs_append(folderHash, folderKey, folderName) {
+async function breadcrumbs_append(folderHash, keyObj, folderName) {
+    // Get the base64 key if not using the root key
+    let folderKey = null;
+    try {
+        const keyRaw = await crypto.subtle.exportKey('raw', keyObj);
+        folderKey = btoa(String.fromCharCode(...new Uint8Array(keyRaw)));
+    } catch {
+        // Tried to export the root key... just keep null
+    }
+
     // Create a new head
     const head = document.createElement('li');
     const span = document.createElement('span');
@@ -26,7 +35,9 @@ function breadcrumbs_append(folderHash, folderKey, folderName) {
                 nextNode = nextNode.nextElementSibling;
                 nodeToRemove.remove();
             }
-            filetable_goToFolder(targetHash, targetKey, targetName, (updateBreadcrumbs = false));
+            e2ee_parseKey(KeyType.B64, targetKey).then((keyObj) =>
+                filetable_goToFolder(targetHash, keyObj, targetName, (updateBreadcrumbs = false))
+            );
         };
     }
 }

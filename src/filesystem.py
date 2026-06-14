@@ -1,57 +1,214 @@
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
+from secrets import token_bytes
+from time import time
 
 
-class KVDatabase:
+class ExoDatabase:
+    @contextmanager
+    def get_cursor(self):
+        cursor = self.conn.cursor()
+        try:
+            yield cursor
+        finally:
+            cursor.close()
+
     def __init__(self, db_path: Path):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.cursor = self.conn.cursor()
-        self.cursor.execute('PRAGMA journal_mode=WAL;')
-        self._create_table()
+        with self.get_cursor() as cursor:
+            cursor.execute('PRAGMA journal_mode=WAL;')
+        self._create_tables()
 
-    def _create_table(self):
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS kv_store (
-                key TEXT PRIMARY KEY,
-                value BLOB NOT NULL
-            )
-        ''')
+    def _create_tables(self):
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    uuid    TEXT PRIMARY KEY,
+                    salt    BLOB NOT NULL,
+                    pubkey  BLOB NOT NULL,
+                    privkey BLOB NOT NULL,
+                    iv      BLOB NOT NULL
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS roots (
+                    uuid    TEXT PRIMARY KEY,
+                    root    BLOB,
+                    FOREIGN KEY (uuid) REFERENCES users(uuid)
+                );
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS sessions (
+                    sid     TEXT PRIMARY KEY,
+                    uuid    TEXT NOT NULL,
+                    token   BLOB NOT NULL,
+                    expires INTEGER NOT NULL,
+                    FOREIGN KEY (uuid) REFERENCES users(uuid)
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS nonces (
+                    nonce_hash TEXT PRIMARY KEY,
+                    created_at INTEGER NOT NULL
+                )
+            ''')
         self.conn.commit()
 
-    def get_value(self, key: str) -> Optional[str]:
-        self.cursor.execute('''
-            SELECT value FROM kv_store WHERE key = ?
-        ''', (key,))
-        result = self.cursor.fetchone()
-        if result:
-            return result[0]
+    def _uuid_exists(self, uuid):
+        with self.get_cursor() as cursor:
+            cursor.execute('SELECT 1 FROM users WHERE uuid = ? LIMIT 1', (uuid,))
+            return cursor.fetchone() is not None
+
+    def create_user(self, uuid, salt, pubkey, privkey, iv):
+        # The UUID is not allowed to exist already
+        if self._uuid_exists(uuid):
+            return False
+
+        # Create user
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                INSERT INTO users (uuid, salt, pubkey, privkey, iv)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (uuid, salt, pubkey, privkey, iv))
+
+            # Create user root placeholder
+            cursor.execute('''
+                INSERT INTO roots (uuid, root)
+                VALUES (?, ?)
+            ''', (uuid, None))
+        self.conn.commit()
+        return True
+
+    def get_key_material(self, uuid):
+        # Get user information
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                SELECT uuid, salt, pubkey, privkey, iv
+                FROM users
+                WHERE uuid = ?
+            ''', (uuid,))
+            row = cursor.fetchone()
+
+        # Return in a way that is easy to use
+        if row:
+            return {
+                'uuid': row[0],
+                'salt': row[1],
+                'pubkey': row[2],
+                'privkey': row[3],
+                'iv': row[4]
+            }
         return None
 
-    def set_value(self, key: str, value: str):
-        self.cursor.execute('''
-            INSERT INTO kv_store (key, value)
-            VALUES (?, ?)
-        ''', (key, value))
+    def generate_auth_token(self, uuid):
+        # Generate token and metadata
+        session_id = token_bytes(16).hex()
+        token = token_bytes(32).hex()
+        expires_at = int(time()) + 3600
+
+        # Save all
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                INSERT INTO sessions (sid, uuid, token, expires)
+                VALUES (?, ?, ?, ?)
+            ''', (session_id, uuid, token, expires_at))
         self.conn.commit()
 
-    def update_value(self, key: str, value: str):
-        self.cursor.execute('''
-            UPDATE kv_store
-            SET value = ?
-            WHERE key = ?
-        ''', (value, key))
+        # Return only the token
+        return token
+
+    def add_nonce(self, nonce_hash, created_at):
+        # Add the nonce
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                INSERT INTO nonces (nonce_hash, created_at)
+                VALUES (?, ?)
+                ''', (nonce_hash, created_at))
         self.conn.commit()
 
-    def upsert_value(self, key: str, value: str):
-        self.cursor.execute('''
-            INSERT OR REPLACE INTO kv_store (key, value)
-            VALUES (?, ?)
-        ''', (key, value))
+    def consume_nonce(self, nonce_hash):
+        with self.get_cursor() as cursor:
+            # Query for the nonce
+            cursor.execute('''
+                SELECT created_at FROM nonces
+                WHERE nonce_hash = ?
+            ''', (nonce_hash,))
+            row = cursor.fetchone()
+            if row is None:
+                return False
+
+            # Delete the nonce
+            cursor.execute('''
+                DELETE FROM nonces
+                WHERE nonce_hash = ?
+            ''', (nonce_hash,))
         self.conn.commit()
 
-    def close(self):
-        self.conn.close()
+        # Validate the nonce
+        created_at = row[0]
+        current_time = int(time())
+        if current_time - created_at > 300:
+            return False
+        return True
+
+    def check_token(self, uuid, token):
+        with self.get_cursor() as cursor:
+            # Query for the session
+            cursor.execute('''
+                SELECT expires FROM sessions
+                WHERE uuid = ? AND token = ?
+            ''', (uuid, token))
+            row = cursor.fetchone()
+            if row is None:
+                return False
+
+            # Get temporal data
+            expires = row[0]
+            current_time = int(time())
+
+            # If the token is expired, delete it
+            if expires < current_time:
+                cursor.execute('''
+                    DELETE FROM sessions
+                    WHERE uuid = ? AND token = ?
+                ''', (uuid, token))
+                self.conn.commit()
+                return False
+
+            # If the token is valid , refresh it
+            else:
+                new_expires = current_time + 3600
+                cursor.execute('''
+                    UPDATE sessions
+                    SET expires = ?
+                    WHERE uuid = ? AND token = ?
+                ''', (new_expires, uuid, token))
+                self.conn.commit()
+                return True
+
+    def get_root_hash(self, uuid):
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                SELECT root FROM roots
+                WHERE uuid = ?
+            ''', (uuid,))
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+    def upsert_root_hash(self, uuid, root):
+        if not self._uuid_exists(uuid):
+            return False
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                INSERT OR REPLACE INTO roots (uuid, root)
+                VALUES (?, ?)
+            ''', (uuid, root))
+        self.conn.commit()
+        return True
 
 
 """
@@ -64,14 +221,14 @@ def new_file(sandbox: Path, name: str, data: bytes):
         f.write(data)
 
 
-"""
-Get the contents of a file
-"""
-def read_file(sandbox: Path, name: str):
-    target = sandbox / name[0:2] / name[2:4] / name
-    with target.open('rb') as f:
-        data = f.read()
-    return data
+# """
+# Get the contents of a file
+# """
+# def read_file(sandbox: Path, name: str):
+#     target = sandbox / name[0:2] / name[2:4] / name
+#     with target.open('rb') as f:
+#         data = f.read()
+#     return data
 
 
 """

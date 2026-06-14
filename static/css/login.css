@@ -1,0 +1,144 @@
+/* Page Layout */
+.page-layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+
+    /* Boring links */
+    a {
+        text-decoration: none;
+        color: inherit;
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+}
+
+/* Center the login box */
+.login-wrapper {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex: 1;
+}
+
+/* Login box container */
+.login-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 40px;
+    background-color: var(--bg-light);
+    border-radius: 10px;
+    width: 100%;
+    max-width: 600px;
+    box-sizing: border-box;
+}
+
+/* Hero Logo */
+.hero-logo {
+    background-color: var(--bg-light);
+    position: absolute;
+    padding-left: 16px;
+    z-index: 100;
+    width: calc(100% - 16px);
+}
+
+.hero-logo img {
+    height: 78px;
+    width: auto;
+    display: block;
+}
+
+/* Favicon logo */
+.login-logo {
+    display: block;
+    margin: 0 auto 10px auto;
+    max-width: 100px;
+    height: auto;
+}
+
+/* Title */
+.login-title {
+    text-align: center;
+    margin: 0;
+    font-size: 38px;
+}
+
+/* Labels */
+.login-label {
+    font-size: 14px;
+    color: var(--fg);
+    margin-top: 16px;
+    display: block;
+}
+
+/* Inputs */
+.login-input {
+    height: 40px;
+    border-radius: 5px;
+    border-color: var(--border-color-emph);
+    border-width: 1px;
+    background-color: var(--bg-dark);
+    color: var(--fg);
+    box-sizing: border-box;
+    min-width: 305px;
+    width: 100% !important;
+}
+
+.login-input:focus {
+    outline: none;
+    border-color: var(--border-color);
+}
+
+/* Login Button */
+.login-button {
+    display: flex;
+    background-color: var(--bg-light-hover);
+    height: 48px;
+    align-content: center;
+    align-items: center;
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+    border: 1px solid var(--border-color-emph);
+    color: var(--fg);
+    font-size: 16px;
+    justify-content: center;
+    margin-top: 16px;
+}
+
+.login-button:hover {
+    background-color: var(--border-color-emph);
+}
+
+/* Signup link */
+.login-signup {
+    margin-top: 8px;
+    color: var(--fg-subtle);
+    font-size: smaller;
+
+    & > span {
+        font-weight: bold;
+    }
+}
+
+/* Information footer */
+.info-footer {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 0;
+    width: 100%;
+}
+
+.info-version {
+    color: var(--fg);
+    font-weight: 600;
+}
+
+.info-copyright {
+    font-size: smaller;
+    color: var(--fg-subtle);
+}

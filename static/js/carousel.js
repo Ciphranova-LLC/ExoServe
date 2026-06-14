@@ -10,7 +10,9 @@ function carousel_update(rowNode) {
     const filePath = rowNode.getAttribute('data-hash');
     const fileKey = rowNode.getAttribute('data-key');
     const fileName = rowNode.getAttribute('data-name');
-    e2ee_downloadAndDecrypt(filePath, fileKey, fileName);
+    e2ee_parseKey(KeyType.B64, fileKey).then((keyObj) =>
+        e2ee_downloadAndDecrypt(filePath, keyObj, fileName)
+    );
 }
 
 function carousel_next() {

@@ -1,125 +1,243 @@
-async function keyhandler_sendKeyToServer(uuid) {
-    return await fetch('/set-uuid', {
+// Posisble key types
+const KeyType = Object.freeze({
+    ROOT: Symbol('root'),
+    NEW: Symbol('new'),
+    B64: Symbol('b64'),
+});
+
+// Global IndexedDB handler for securely storing CryptoKey objects
+const keyDB = {
+    async _getStore(mode) {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open('e2ee-store', 1);
+            req.onupgradeneeded = (e) => e.target.result.createObjectStore('keys');
+            req.onsuccess = (e) =>
+                resolve(e.target.result.transaction('keys', mode).objectStore('keys'));
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async setActiveKey(cryptoKey) {
+        const store = await this._getStore('readwrite');
+        return new Promise((resolve, reject) => {
+            const req = store.put(cryptoKey, 'active_crypto_key');
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async getMasterKey() {
+        const store = await this._getStore('readonly');
+        return new Promise((resolve, reject) => {
+            const req = store.get('master_key');
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async setMasterKey(cryptoKey) {
+        const store = await this._getStore('readwrite');
+        return new Promise((resolve, reject) => {
+            const req = store.put(cryptoKey, 'master_key');
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    },
+};
+
+async function keyhandler_generateUuidv8(seed) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(seed);
+
+    // Hash and truncate the seed data
+    const hash = await crypto.subtle.digest('SHA-256', data);
+    const bytes = new Uint8Array(hash, 0, 16);
+
+    // Set custom/experimental bits (RFC 9562)
+    bytes[6] = (bytes[6] & 0x0f) | 0x80;
+
+    // Set variant to 10xx (RFC 9562)
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    // Convert to hex string
+    let hex = '';
+    for (const b of bytes) {
+        hex += b.toString(16).padStart(2, '0');
+    }
+
+    // Return in UUID format: 8-4-4-4-12
+    return [
+        hex.substring(0, 8),
+        hex.substring(8, 12),
+        hex.substring(12, 16),
+        hex.substring(16, 20),
+        hex.substring(20, 32),
+    ].join('-');
+}
+
+async function keyhandle_deriveKey(password, salt) {
+    const enc = new TextEncoder();
+    const material = await window.crypto.subtle.importKey(
+        'raw',
+        enc.encode(password),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveKey']
+    );
+    return window.crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: salt, iterations: 600000, hash: 'SHA-256' },
+        material,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt', 'decrypt']
+    );
+}
+
+async function keyhandler_register(username, password, salt) {
+    // Derive the master key
+    const master = await keyhandle_deriveKey(password, salt);
+
+    // Generate a random RSA key pair
+    const pair = await window.crypto.subtle.generateKey(
+        {
+            name: 'RSASSA-PKCS1-v1_5',
+            modulusLength: 2048,
+            publicExponent: new Uint8Array([1, 0, 1]),
+            hash: 'SHA-256',
+        },
+        true,
+        ['sign', 'verify']
+    );
+
+    // Export the public key from the key pair
+    const pubKeyRaw = await window.crypto.subtle.exportKey('spki', pair.publicKey);
+    const pubKeyPem = btoa(String.fromCharCode(...new Uint8Array(pubKeyRaw)));
+
+    // Export and encrypt the private key
+    const privKeyRaw = await window.crypto.subtle.exportKey('pkcs8', pair.privateKey);
+    const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    const encPrivKey = await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv },
+        master,
+        privKeyRaw
+    );
+
+    // Generate a deterministic UUID from the username
+    const uuid = await keyhandler_generateUuidv8(username);
+
+    // Send the UUID, salt, the public key, and the encrypted private key
+    return await fetch('/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            uuid: uuid,
+            salt: btoa(String.fromCharCode(...new Uint8Array(salt))),
+            public_key: pubKeyPem,
+            private_key: {
+                iv: btoa(String.fromCharCode(...iv)),
+                data: btoa(String.fromCharCode(...new Uint8Array(encPrivKey))),
+            },
+        }),
+    });
+}
+
+async function keyhandler_login(username, password) {
+    // Generate a deterministic UUID from the username
+    const uuid = await keyhandler_generateUuidv8(username);
+
+    // Request a challenge from the server
+    let res = await fetch('/auth/challenge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             uuid: uuid,
         }),
     });
-}
 
-function keyhandler_generateAndDownloadKey() {
-    // Generate 32-byte random key, base64 encoded
-    const arr = new Uint8Array(32);
-    crypto.getRandomValues(arr);
-    const key = btoa(String.fromCharCode(...arr));
+    // It's possible the server encounters some issue
+    // But it should always return key material, even if the UUID doesn't exist
+    if (res.status != 200) return null;
+    let data = await res.json();
 
-    // Generate UUID
-    const uuid = crypto.randomUUID();
+    // Helper to decode base64 to Uint8Array
+    const b64toUint8 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
 
-    // Dynamically generate a link to download the file from
-    const content = `key:${key}\nuuid:${uuid}`;
-    const blob = new Blob([content], { type: 'text/plain' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'encryption.key';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
+    try {
+        // Decode key material data
+        const salt = b64toUint8(data['salt']);
+        const iv = b64toUint8(data['iv']);
+        const encPrivKey = b64toUint8(data['privkey']);
+        const nonce = b64toUint8(data['nonce']);
 
-async function keyhandler_setSessionKey() {
-    // Create a psuedo-element to select a file
-    const input = document.createElement('input');
-    input.type = 'file';
+        // Derive and store the master key
+        const master = await keyhandle_deriveKey(password, salt);
+        keyDB.setMasterKey(master);
 
-    // Define behvaior for when the selector changes
-    input.addEventListener('change', async function (event) {
-        // Validate a file was selected
-        const file = event.target.files[0];
-        if (!file) return;
+        // Decrypt the private key
+        const privKeyRaw = await window.crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: iv },
+            master,
+            encPrivKey
+        );
 
-        // Clear breadcrumbs
-        breadcrumbs_clear();
+        // Import private Key
+        const keyPair = await window.crypto.subtle.importKey(
+            'pkcs8',
+            privKeyRaw,
+            { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+            false,
+            ['sign']
+        );
 
-        try {
-            // Find the appropriate lines in the file
-            const text = await file.text();
-            const lines = text.split('\n');
-            const keyLine = lines.find((l) => l.startsWith('key:'));
-            const uuidLine = lines.find((l) => l.startsWith('uuid:'));
-            if (!keyLine || !uuidLine) {
-                alert('Invalid key file format');
-                return;
-            }
+        // Sign the nonce
+        const signature = await window.crypto.subtle.sign('RSASSA-PKCS1-v1_5', keyPair, nonce);
 
-            // Parse and validate the lines
-            const key = keyLine.split('key:')[1].trim();
-            const uuid = uuidLine.split('uuid:')[1].trim();
-
-            // Only the non-sensitive UUID goes into sessionStorage now
-            sessionStorage.setItem('key_uuid', uuid);
-
-            // Import the root key as a strict AES-GCM CryptoKey object and save to IndexedDB
-            const raw = Uint8Array.from(atob(key), (c) => c.charCodeAt(0));
-            const rootCryptoKey = await crypto.subtle.importKey(
-                'raw',
-                raw,
-                { name: 'AES-GCM' },
-                false,
-                ['encrypt', 'decrypt']
-            );
-            await keyDB.setRootKey(rootCryptoKey);
-
-            // Check for the loaded key
-            keyhandler_check();
-        } catch (e) {
-            console.error(e);
-            alert('Failed to process key file');
-        }
-    });
-
-    // Click the psuedo-element
-    input.click();
+        // Submit the signed nonce
+        return await fetch('/auth/submit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                uuid: uuid,
+                nonce: data['nonce'],
+                signature: btoa(String.fromCharCode(...new Uint8Array(signature))),
+            }),
+        });
+    } catch (e) {
+        return null;
+    }
 }
 
 async function keyhandler_check() {
-    const keyNamePre = document.getElementById('key-name');
-    const storedKeyUuid = sessionStorage.getItem('key_uuid');
+    // Get the Session Storage items
+    const uuid = sessionStorage.getItem('uuid');
+    const authToken = sessionStorage.getItem('auth_token');
 
-    // Check for the Root Key object in IndexedDB
-    const storedRootKey = await keyDB.getRootKey();
+    // Get the IndexedDB items
+    const masterKey = await keyDB.getMasterKey();
 
-    if (storedRootKey && storedKeyUuid) {
-        let res = await keyhandler_sendKeyToServer(storedKeyUuid);
-        let rootHash = await res.text();
+    // Fail if anything is missing
+    if (!(masterKey && uuid && authToken)) return false;
 
-        if (res.ok) {
-            if (res.status == 204 || rootHash.trim() === '')
-                rootHash = (await e2ee_newFolder(isRoot = true))['hash'];
-            keyNamePre.textContent = storedKeyUuid;
+    // Attempt to get the root node
+    res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&raw=true`, {
+        method: 'GET',
+    });
 
-            filetable_goToFolder(rootHash, 'ROOT', 'Home');
-            return true;
-        } else {
-            keyNamePre.textContent = 'No key set';
-        }
+    // Get the root key
+    const keyObj = await e2ee_parseKey(KeyType.ROOT);
+
+    // If the root node does not exist, create one
+    if (res.status == 204) {
+        rootHash = (await e2ee_newFolder(keyObj))['hash'];
+    } else if (res.status == 200) {
+        rootHash = (await res.json())['root'];
     } else {
-        keyNamePre.textContent = 'No key set';
+        return false;
     }
-    return false;
+
+    // Populate the UI with the root data
+    filetable_goToFolder(rootHash, keyObj, 'Home');
+    return true;
 }
 
-// Try to load the service worker before checking for a session key
+// Try to load the service worker before checking for session data
 document.addEventListener('DOMContentLoaded', () => {
-    navigator.serviceWorker
-        .register('/sw.js')
-        .then(() => keyhandler_check())
-        .then((keyExists) => {
-            if (keyExists) {
-                const storedKeyUuid = sessionStorage.getItem('key_uuid');
-                ui_showToast(`Loaded ${storedKeyUuid}`);
-            }
-        })
-        .catch((err) => console.error('Service Worker Failed', err));
+    navigator.serviceWorker.register('/sw.js').then(() => keyhandler_check());
 });

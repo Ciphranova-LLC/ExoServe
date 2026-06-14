@@ -6,14 +6,14 @@
 .dropdown-menu {
     position: absolute;
     top: 100%;
-    left: 0;         /* Align it with the left edge of the button */
+    left: 0; /* Align it with the left edge of the button */
     margin-top: 4px; /* Give it a little breathing room */
-    
+
     background-color: var(--bg-dark);
     border: 1px solid var(--border-color-emph);
     border-radius: 8px;
     box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
-    
+
     display: flex;
     flex-direction: column;
     min-width: 250px;
@@ -48,8 +48,12 @@
     user-select: none;
 }
 
-.dropdown-item:first-child { margin-top: 8px; }
-.dropdown-item:last-child { margin-bottom: 8px; }
+.dropdown-item:first-child {
+    margin-top: 8px;
+}
+.dropdown-item:last-child {
+    margin-bottom: 8px;
+}
 
 .dropdown-item:hover {
     background-color: var(--bg-light-hover);

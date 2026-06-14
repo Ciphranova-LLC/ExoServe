@@ -38,9 +38,8 @@
             height: 16px;
             vertical-align: middle;
             padding-right: 6px;
-            filter: brightness(0) saturate(100%)
-                    invert(60%) sepia(1%) saturate(1539%)
-                    hue-rotate(28deg) brightness(88%) contrast(98%);
+            filter: brightness(0) saturate(100%) invert(60%) sepia(1%) saturate(1539%)
+                hue-rotate(28deg) brightness(88%) contrast(98%);
         }
     }
 
@@ -67,15 +66,15 @@
         font-size: larger;
     }
 
-    input[type=checkbox] {
+    input[type='checkbox'] {
         -webkit-appearance: none;
         appearance: none;
-        
-        width: 22px; 
+
+        width: 22px;
         height: 22px;
         border-radius: 2px;
         margin: 0;
-        
+
         background-color: var(--bg-light);
         border: 1px solid var(--fg);
 
@@ -84,15 +83,15 @@
         place-content: center;
 
         &::before {
-            content: "";
+            content: '';
             width: 14px;
             height: 14px;
-            
-            background-image: url("../img/checkbox.svg");
+
+            background-image: url('../img/checkbox.svg');
             background-size: contain;
             background-position: center;
             background-repeat: no-repeat;
-            
+
             transform: scale(0);
             transition: 120ms transform ease-in-out;
         }
