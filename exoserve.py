@@ -179,7 +179,7 @@ def route_get_node():
 
     # Validate the auth
     if not EXO_DATABASE.check_token(uuid, auth):
-        return 'Unauthorized', 403
+        return 'Unauthorized', 440
     sandbox = UPLOAD_FOLDER / uuid
 
     # If there is no checksum, assume the client wants the root checksum
@@ -206,7 +206,7 @@ def route_post_node():
 
     # Validate the auth
     if not EXO_DATABASE.check_token(uuid, auth):
-        return 'Unauthorized', 403
+        return 'Unauthorized', 440
     sandbox = UPLOAD_FOLDER / uuid
     staging = sandbox / 'staging'
 
@@ -296,7 +296,7 @@ def route_delete_node():
 
     # Validate the auth
     if not EXO_DATABASE.check_token(uuid, auth):
-        return 'Unauthorized', 403
+        return 'Unauthorized', 440
     sandbox = UPLOAD_FOLDER / uuid
 
     # Determine which checksum to delete

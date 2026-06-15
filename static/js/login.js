@@ -14,6 +14,9 @@ if (urlParams.get('source') == 'signup') {
     statusElem.style.visibility = 'visible';
     statusElem.innerHTML =
         "<span style='color:#57E0AA;'>User registeration successful. You may now login</span>";
+} else if (urlParams.get('source') == 'expire') {
+    statusElem.style.visibility = 'visible';
+    statusElem.innerHTML = "<span style='color:#E0578D;'>Session expired</span>";
 }
 
 async function login_register() {

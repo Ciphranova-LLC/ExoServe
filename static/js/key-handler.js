@@ -225,11 +225,21 @@ async function keyhandler_check() {
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
 
-    // Get the IndexedDB items
-    const masterKey = await keyDB.getMasterKey(uuid);
+    // Fail early if missing session data
+    if (!(uuid && authToken)) {
+        sessionStorage.removeItem('uuid');
+        sessionStorage.removeItem('auth_token');
+        if (window.location.pathname != '/login' && window.location.pathname != '/signup') window.location.href = '/login';
+    }
 
-    // Fail if anything is missing
-    if (!(masterKey && uuid && authToken)) return false;
+    // Get the IndexedDB master key
+    try {
+        const masterKey = await keyDB.getMasterKey(uuid);
+    } catch {
+        sessionStorage.removeItem('uuid');
+        sessionStorage.removeItem('auth_token');
+        if (window.location.pathname != '/login' && window.location.pathname != '/signup') window.location.href = '/login';
+    }
 
     // Attempt to get the root node
     res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&raw=true`, {
@@ -244,6 +254,10 @@ async function keyhandler_check() {
         rootHash = (await e2ee_newFolder(keyObj))['hash'];
     } else if (res.status == 200) {
         rootHash = (await res.json())['root'];
+    } else if (res.status === 440) {
+        sessionStorage.removeItem('uuid');
+        sessionStorage.removeItem('auth_token');
+        if (window.location.pathname != '/login' && window.location.pathname != '/signup') window.location.href = '/login?source=expire';
     } else {
         return false;
     }
