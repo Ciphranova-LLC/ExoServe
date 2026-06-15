@@ -229,7 +229,8 @@ async function keyhandler_check() {
     if (!(uuid && authToken)) {
         sessionStorage.removeItem('uuid');
         sessionStorage.removeItem('auth_token');
-        if (window.location.pathname != '/login' && window.location.pathname != '/signup') window.location.href = '/login';
+        if (window.location.pathname != '/login' && window.location.pathname != '/signup')
+            window.location.href = '/login';
     }
 
     // Get the IndexedDB master key
@@ -238,7 +239,8 @@ async function keyhandler_check() {
     } catch {
         sessionStorage.removeItem('uuid');
         sessionStorage.removeItem('auth_token');
-        if (window.location.pathname != '/login' && window.location.pathname != '/signup') window.location.href = '/login';
+        if (window.location.pathname != '/login' && window.location.pathname != '/signup')
+            window.location.href = '/login';
     }
 
     // Attempt to get the root node
@@ -257,7 +259,8 @@ async function keyhandler_check() {
     } else if (res.status === 440) {
         sessionStorage.removeItem('uuid');
         sessionStorage.removeItem('auth_token');
-        if (window.location.pathname != '/login' && window.location.pathname != '/signup') window.location.href = '/login?source=expire';
+        if (window.location.pathname != '/login' && window.location.pathname != '/signup')
+            window.location.href = '/login?source=expire';
     } else {
         return false;
     }
@@ -268,6 +271,10 @@ async function keyhandler_check() {
 }
 
 // Try to load the service worker before checking for session data
-document.addEventListener('DOMContentLoaded', () => {
-    navigator.serviceWorker.register('/sw.js').then(() => keyhandler_check());
+document.addEventListener('DOMContentLoaded', async () => {
+    await navigator.serviceWorker.register('/sw.js');
+    if (await keyhandler_check()) {
+        const uuid_ui = document.getElementById('key-name');
+        uuid_ui.innerHTML = sessionStorage.getItem('uuid');
+    }
 });
