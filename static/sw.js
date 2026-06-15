@@ -1,5 +1,4 @@
 // Key in use
-let activeDecryptionKey = null;
 const ivCache = new Map();
 
 // Constants
@@ -8,13 +7,13 @@ const CHUNK_E_SIZE = CHUNK_P_SIZE + 16; // 5MB + 16-byte Auth Tag
 
 // Helper to pull the CryptoKey object out of IndexedDB
 const keyDB = {
-    async getActiveKey() {
+    async getKey(keyId) {
         return new Promise((resolve, reject) => {
             const req = indexedDB.open('e2ee-store', 1);
             req.onupgradeneeded = (e) => e.target.result.createObjectStore('keys');
             req.onsuccess = (e) => {
                 const store = e.target.result.transaction('keys', 'readonly').objectStore('keys');
-                const getReq = store.get('active_crypto_key');
+                const getReq = store.get(keyId);
                 getReq.onsuccess = () => resolve(getReq.result);
                 getReq.onerror = () => reject(getReq.error);
             };
@@ -31,24 +30,6 @@ self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
-    // Arming Route (forcefully load the key into RAM from IndexedDB)
-    if (url.pathname === '/arm-worker') {
-        event.respondWith(
-            (async () => {
-                try {
-                    activeDecryptionKey = await keyDB.getActiveKey();
-                    if (!activeDecryptionKey)
-                        return new Response('Missing key in DB', { status: 400 });
-                    return new Response('Worker Armed', { status: 200 });
-                } catch (err) {
-                    console.error('Failed to arm worker:', err);
-                    return new Response('Arming Failed', { status: 500 });
-                }
-            })()
-        );
-        return;
-    }
-
     // The File Routes
     if (url.pathname.includes('/node') && event.request.method === 'GET') {
         // Bypass the Service Worker if the UI requests raw encrypted bytes
@@ -59,18 +40,18 @@ self.addEventListener('fetch', (event) => {
     }
 });
 
-// Ensure a key is in use
-async function ensureKey() {
-    if (activeDecryptionKey) return true;
-    activeDecryptionKey = await keyDB.getActiveKey();
-    return !!activeDecryptionKey;
+// Get the key used for a specific request
+async function getKeyForRequest(urlObj) {
+    const hash = urlObj.searchParams.get('hash');
+    if (!hash) return null;
+    return await keyDB.getKey(hash);
 }
 
 // Wholly decrypt a non-streamed file
 async function decryptWhole(cleanServerUrl, clientId, filename) {
     // Validate there is a key
-    const isArmed = await ensureKey();
-    if (!isArmed) return fetch(cleanServerUrl);
+    const activeDecryptionKey = await getKeyForRequest(new URL(cleanServerUrl));
+    if (!activeDecryptionKey) return fetch(cleanServerUrl);
 
     // Get the extension from the clean URL
     const ext = cleanServerUrl.split('.').pop().toLowerCase();
@@ -169,8 +150,8 @@ async function handleDecryption(request, clientId) {
     // Stream decrypt videos
     else {
         // Validate there is a key
-        const isArmed = await ensureKey();
-        if (!isArmed) return fetch(request);
+        const activeDecryptionKey = await getKeyForRequest(urlObj);
+        if (!activeDecryptionKey) return fetch(request);
         let ivBuffer;
         let totalPlaintextSize;
         let totalEncryptedSize;

@@ -129,17 +129,18 @@ function __e2ee_refreshTableView(crumbs) {
 }
 
 // Arm the service worker with a key
-async function e2ee_armWorker(keyObj) {
-    await keyDB.setActiveKey(keyObj);
-    await fetch('/arm-worker');
-    return keyObj;
+async function e2ee_armWorker(keyObj, hash) {
+    await keyDB.setActiveKey(keyObj, hash);
 }
 
 // Parse the key in memory
 async function e2ee_parseKey(keyType, data = null) {
+    // Get UUID from session for Master Key lookup
+    const uuid = sessionStorage.getItem('uuid');
+
     // Master key
     if (keyType === KeyType.ROOT) {
-        return await keyDB.getMasterKey();
+        return await keyDB.getMasterKey(uuid);
     }
 
     // Generate a new random key
@@ -152,7 +153,7 @@ async function e2ee_parseKey(keyType, data = null) {
 
     // Import a key from base64
     else if (keyType === KeyType.B64) {
-        if (data === null || data === 'null') return await keyDB.getMasterKey();
+        if (data === null || data === 'null') return await keyDB.getMasterKey(uuid);
         const raw = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
         return await crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, true, [
             'encrypt',
@@ -166,13 +167,11 @@ async function e2ee_parseKey(keyType, data = null) {
 
 // Download a file to the client system
 async function e2ee_downloadFile(hash, keyObj, filename) {
-    await e2ee_armWorker(keyObj);
+    await e2ee_armWorker(keyObj, hash);
 
     // Get session info
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
-
-    // await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}`, { method: 'DELETE' });
 
     // Create an element to trigger the download manager
     const a = document.createElement('a');
@@ -521,7 +520,7 @@ async function e2ee_newFolder(
 // Download, decrypt, and preview a file
 async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
     // Arm the service worker
-    await e2ee_armWorker(decryptKey);
+    await e2ee_armWorker(decryptKey, hash);
 
     // Get the Session Storage items
     const uuid = sessionStorage.getItem('uuid');
@@ -721,6 +720,9 @@ async function e2ee_deleteNode(hash, type, keyObj) {
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
     await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}`, { method: 'DELETE' });
+
+    // Delete the key from IndexedDB
+    await keyDB.deleteKey(hash);
 }
 
 // Listen for messages from the Service Worker

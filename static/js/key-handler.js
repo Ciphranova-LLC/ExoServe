@@ -16,26 +16,42 @@ const keyDB = {
             req.onerror = () => reject(req.error);
         });
     },
-    async setActiveKey(cryptoKey) {
-        const store = await this._getStore('readwrite');
-        return new Promise((resolve, reject) => {
-            const req = store.put(cryptoKey, 'active_crypto_key');
-            req.onsuccess = () => resolve();
-            req.onerror = () => reject(req.error);
-        });
-    },
-    async getMasterKey() {
+    async getKey(keyId) {
         const store = await this._getStore('readonly');
         return new Promise((resolve, reject) => {
-            const req = store.get('master_key');
+            const req = store.get(keyId);
             req.onsuccess = () => resolve(req.result);
             req.onerror = () => reject(req.error);
         });
     },
-    async setMasterKey(cryptoKey) {
+    async setMasterKey(cryptoKey, uuid) {
         const store = await this._getStore('readwrite');
         return new Promise((resolve, reject) => {
-            const req = store.put(cryptoKey, 'master_key');
+            const req = store.put(cryptoKey, uuid);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async getMasterKey(uuid) {
+        const store = await this._getStore('readonly');
+        return new Promise((resolve, reject) => {
+            const req = store.get(uuid);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async setActiveKey(cryptoKey, keyId) {
+        const store = await this._getStore('readwrite');
+        return new Promise((resolve, reject) => {
+            const req = store.put(cryptoKey, keyId);
+            req.onsuccess = () => resolve();
+            req.onerror = () => reject(req.error);
+        });
+    },
+    async deleteKey(keyId) {
+        const store = await this._getStore('readwrite');
+        return new Promise((resolve, reject) => {
+            const req = store.delete(keyId);
             req.onsuccess = () => resolve();
             req.onerror = () => reject(req.error);
         });
@@ -168,7 +184,7 @@ async function keyhandler_login(username, password) {
 
         // Derive and store the master key
         const master = await keyhandle_deriveKey(password, salt);
-        keyDB.setMasterKey(master);
+        keyDB.setMasterKey(master, uuid);
 
         // Decrypt the private key
         const privKeyRaw = await window.crypto.subtle.decrypt(
@@ -210,7 +226,7 @@ async function keyhandler_check() {
     const authToken = sessionStorage.getItem('auth_token');
 
     // Get the IndexedDB items
-    const masterKey = await keyDB.getMasterKey();
+    const masterKey = await keyDB.getMasterKey(uuid);
 
     // Fail if anything is missing
     if (!(masterKey && uuid && authToken)) return false;
