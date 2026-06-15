@@ -1,5 +1,13 @@
 let activeContextNode = null;
 
+function ui_signOut() {
+    sessionStorage.removeItem('uuid');
+    sessionStorage.removeItem('auth_token');
+    window.location.href = '/login';
+}
+
+/******************************/
+
 function ui_initContextMenu() {
     const contextMenu = document.getElementById('context-menu');
     const tbody = document.getElementById('file-table-body');

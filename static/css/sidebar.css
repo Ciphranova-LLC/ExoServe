@@ -2,6 +2,12 @@
     width: 72px;
     background-color: var(--bg-light);
     margin-right: 20px;
+
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    justify-content: flex-start;
+
     align-items: center;
     text-align: center;
 
@@ -34,5 +40,10 @@
         &:hover {
             background-color: var(--bg-light-hover);
         }
+    }
+
+    .sidebar-bottom {
+        margin-top: auto;
+        margin-bottom: 10px;
     }
 }

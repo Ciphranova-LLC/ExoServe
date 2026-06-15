@@ -103,3 +103,19 @@ async function login_login() {
         });
     }
 });
+
+// Submit forms when pressing enter
+[usernameElem, passwordElem, confirmElem].forEach((elem) => {
+    if (elem) {
+        elem.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                if (confirmElem) {
+                    login_register();
+                } else {
+                    login_login();
+                }
+            }
+        });
+    }
+});
