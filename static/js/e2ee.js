@@ -3,27 +3,113 @@ const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg'];
 
 let currBlobUrl = null;
 
-// Global lock for the Merkle tree within the same session
+// Global lock for the Merkle tree for the account
 class MerkleMutex {
     constructor() {
         this._locked = false;
         this._queue = [];
+        this._lockKey = null;
+        this._uuid = sessionStorage.getItem('uuid');
+        this._auth = sessionStorage.getItem('auth_token');
+    }
+
+    _generateKey() {
+        const buffer = new Uint8Array(32);
+        window.crypto.getRandomValues(buffer);
+        const binary = String.fromCharCode(...buffer);
+        return btoa(binary);
+    }
+
+    async _tryLock() {
+        const maxRetries = 30;
+        let retries = 0;
+        let delay = 100;
+
+        while (true) {
+            const key = this._generateKey();
+            try {
+                const res = await fetch('/lock/acquire', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        uuid: this._uuid,
+                        auth: this._auth,
+                        key: key,
+                    }),
+                });
+
+                if (!res.ok) {
+                    throw new Error(`Lock acquire network error: ${res.status}`);
+                }
+
+                const data = await res.json();
+
+                if (data.status === 'success') {
+                    this._lockKey = key;
+                    return;
+                } else if (data.status === 'busy') {
+                    retries++;
+                    if (retries > maxRetries) {
+                        throw new Error('Failed to acquire lock after maximum retries');
+                    }
+                    await new Promise((res) => setTimeout(res, delay));
+                    delay = Math.min(delay * 2, 2000);
+                } else {
+                    throw new Error(`Lock acquire failed: ${data.status}`);
+                }
+            } catch (e) {
+                throw new Error(`Network error during lock acquire: ${e.message}`);
+            }
+        }
     }
 
     async acquire() {
-        if (!this._locked) {
-            this._locked = true;
-            return;
+        // Claim the lock synchronously to prevent queue-jumping
+        const wasLocked = this._locked;
+        this._locked = true;
+
+        if (wasLocked) {
+            await new Promise((resolve) => {
+                this._queue.push(resolve);
+            });
         }
-        return new Promise((resolve) => this._queue.push(resolve));
+        await this._tryLock();
     }
 
-    release() {
-        if (this._queue.length > 0) {
-            const nextResolve = this._queue.shift();
-            nextResolve();
-        } else {
-            this._locked = false;
+    async release() {
+        if (!this._locked) {
+            console.warn('MerkleMutex: Release called without holding lock');
+            return;
+        }
+
+        try {
+            const res = await fetch('/lock/release', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    uuid: this._uuid,
+                    auth: this._auth,
+                    key: this._lockKey,
+                }),
+            });
+
+            if (!res.ok) throw new Error(`Lock release network error: ${res.status}`);
+
+            const data = await res.json();
+            if (data.status === 'bad_key') {
+                console.error('MerkleMutex: Server rejected lock release - bad key.');
+            }
+        } catch (error) {
+            console.error('MerkleMutex: Network error during lock release.', error);
+        } finally {
+            this._lockKey = null;
+
+            if (this._queue.length > 0) {
+                const nextTask = this._queue.shift();
+                nextTask();
+            } else {
+                this._locked = false;
+            }
         }
     }
 }
@@ -104,28 +190,36 @@ async function __e2ee_ensureFolderExists(folderName, crumbs) {
             key: newFolderData.key,
         };
     } finally {
-        treeLock.release();
+        await treeLock.release();
     }
 }
 
 // Helper function to conditionally reload the table view
-function __e2ee_refreshTableView(crumbs) {
-    treeLock.acquire().then((_) => {
+async function __e2ee_refreshTableView(crumbs) {
+    await treeLock.acquire();
+
+    try {
         const activeCrumb = crumbs[crumbs.length - 1];
         const finalHash = activeCrumb.getAttribute('data-hash');
         const finalKey = activeCrumb.getAttribute('data-key');
         const finalName = activeCrumb.innerText;
+
+        const isDirectLast = activeCrumb.nextElementSibling === null;
+        const isParentLast =
+            !activeCrumb.parentElement || activeCrumb.parentElement.nextElementSibling === null;
         const isActiveFolder =
             activeCrumb instanceof Element &&
             document.body.contains(activeCrumb) &&
-            activeCrumb.nextElementSibling === null;
+            isDirectLast &&
+            isParentLast;
+
         if (isActiveFolder) {
-            e2ee_parseKey(KeyType.B64, finalKey).then((keyObj) =>
-                filetable_goToFolder(finalHash, keyObj, finalName, false)
-            );
+            const keyObj = await e2ee_parseKey(KeyType.B64, finalKey);
+            filetable_goToFolder(finalHash, keyObj, finalName, false);
         }
-        treeLock.release();
-    });
+    } finally {
+        await treeLock.release();
+    }
 }
 
 // Arm the service worker with a key
@@ -308,10 +402,9 @@ async function e2ee_uploadFile(crumbs) {
 
         try {
             await __e2ee_uploadFile(file, crumbs);
-            __e2ee_refreshTableView(crumbs);
+            await __e2ee_refreshTableView(crumbs);
         } catch (e) {
             console.error(e);
-            alert('Failed to encrypt and upload file');
             return;
         }
     });
@@ -388,7 +481,7 @@ async function e2ee_uploadFolder(crumbs) {
         }
 
         // If the user hasn't navigated away, refresh the table
-        __e2ee_refreshTableView(crumbs);
+        await __e2ee_refreshTableView(crumbs);
 
         // Finalize the master progress toast
         folderProgressToast.finish('Folder upload successful!');
@@ -469,44 +562,69 @@ async function e2ee_newFolder(
     const jsonString = JSON.stringify({ type: 'folder', children: {} });
     const combinedData = await e2ee_encryptWhole(jsonString, keyObj);
 
-    // Create the upload details
-    let details = JSON.stringify({
-        root: isRoot,
-        checksum: combinedData['hash'],
-    });
-
-    // Create the form
-    const formData = new FormData();
-    formData.append('blob', new Blob([combinedData['data']], { type: 'application/octet-stream' }));
-    formData.append('details', details);
-    formData.append('uuid', sessionStorage.getItem('uuid'));
-    formData.append('auth', sessionStorage.getItem('auth_token'));
-
-    // Make request to create the new folder
-    await fetch('/node', {
-        method: 'POST',
-        body: formData,
-    });
-
-    // Extract the key if using a random key, destroying the object
-    let keyBase64 = null;
-    if (!isRoot) {
-        const keyRaw = await crypto.subtle.exportKey('raw', keyObj);
-        keyBase64 = btoa(String.fromCharCode(...new Uint8Array(keyRaw)));
+    // If mutating the root pointer, ensure lock
+    const needToAcquireLock = isRoot && !hasLock;
+    if (needToAcquireLock) {
+        await treeLock.acquire();
     }
 
-    // Update the Merkle Tree
+    let keyBase64 = null;
     let newParentHash = null;
-    if (!isRoot) {
-        let childMetadata = {
-            added: Date.now(),
-            type: 'folder',
-            size: 0,
-            hash: combinedData['hash'],
-            key: keyBase64,
-        };
-        newParentHash = await e2ee_walkMerkleTree(crumbs, folderName, childMetadata, hasLock);
-        __e2ee_refreshTableView(crumbs);
+
+    try {
+        // Create the upload details
+        let details = JSON.stringify({
+            root: isRoot,
+            checksum: combinedData['hash'],
+            lock_key: treeLock._lockKey,
+        });
+
+        // Create the form
+        const formData = new FormData();
+        formData.append(
+            'blob',
+            new Blob([combinedData['data']], { type: 'application/octet-stream' })
+        );
+        formData.append('details', details);
+        formData.append('uuid', sessionStorage.getItem('uuid'));
+        formData.append('auth', sessionStorage.getItem('auth_token'));
+
+        // Make request to create the new folder
+        const res = await fetch('/node', {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!res.ok) {
+            throw new Error(`Server rejected folder creation: ${res.status}`);
+        }
+
+        // Extract the key if using a random key, destroying the object
+        if (!isRoot) {
+            const keyRaw = await crypto.subtle.exportKey('raw', keyObj);
+            keyBase64 = btoa(String.fromCharCode(...new Uint8Array(keyRaw)));
+        }
+
+        // Update the Merkle Tree
+        if (!isRoot) {
+            let childMetadata = {
+                added: Date.now(),
+                type: 'folder',
+                size: 0,
+                hash: combinedData['hash'],
+                key: keyBase64,
+            };
+            newParentHash = await e2ee_walkMerkleTree(crumbs, folderName, childMetadata, hasLock);
+
+            if (!hasLock) {
+                await __e2ee_refreshTableView(crumbs);
+            }
+        }
+    } finally {
+        // Safely release the lock if it was acquired here
+        if (needToAcquireLock) {
+            await treeLock.release();
+        }
     }
 
     // Return the hash of the new folder
@@ -666,6 +784,7 @@ async function e2ee_walkMerkleTree(
                 root: isRoot,
                 checksum: newParentHash,
                 stale: parentHash,
+                lock_key: treeLock._lockKey,
             });
             const formData = new FormData();
             formData.append(
@@ -688,7 +807,7 @@ async function e2ee_walkMerkleTree(
             };
         }
     } finally {
-        if (!hasLock) treeLock.release();
+        if (!hasLock) await treeLock.release();
     }
     return returnHash;
 }
@@ -719,7 +838,10 @@ async function e2ee_deleteNode(hash, type, keyObj) {
     // Delete the blob itself
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
-    await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}`, { method: 'DELETE' });
+    const lockKey = encodeURIComponent(treeLock._lockKey);
+    await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}&lock_key=${lockKey}`, {
+        method: 'DELETE',
+    });
 
     // Delete the key from IndexedDB
     await keyDB.deleteKey(hash);

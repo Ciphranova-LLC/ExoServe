@@ -117,8 +117,9 @@ function ui_submitDelete() {
     e2ee_walkMerkleTree(crumbs, activeContextNode.name, null)
         .then((_) => {
             dialog.close();
-            __e2ee_refreshTableView(crumbs);
-            ui_showToast(`Deleted ${activeContextNode.name}`);
+            __e2ee_refreshTableView(crumbs).then(() =>
+                ui_showToast(`Deleted ${activeContextNode.name}`)
+            );
         })
         .catch((err) => {
             console.error('Failed to delete node:', err);
@@ -196,8 +197,7 @@ function ui_submitRenameNodeModal() {
             .then(() => {
                 input.value = '';
                 dialog.close();
-                __e2ee_refreshTableView(crumbs);
-                ui_showToast(`Renamed to "${newName}"`);
+                __e2ee_refreshTableView(crumbs).then(() => ui_showToast(`Renamed to "${newName}"`));
             })
             .catch((err) => {
                 console.error('Failed to rename node:', err);

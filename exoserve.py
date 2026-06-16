@@ -170,6 +170,54 @@ def auth_submit():
         return f'', 400
 
 
+@app.route('/lock/acquire', methods=['POST'])
+def lock_acquire():
+    # Pull the user information from the parameters
+    data = request.get_json()
+    uuid = data.get('uuid')
+    auth = data.get('auth')
+    key = data.get('key')
+
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth):
+        return 'Unauthorized', 440
+
+    # Attempt to acquire the lock
+    success, status = EXO_DATABASE.acquire_lock(uuid, key)
+
+    # Return the result
+    if success:
+        return jsonify({"status": "success"}), 200
+    elif status == 409:
+        return jsonify({"status": "busy"}), 200
+    return jsonify({"status": "fail"}), 400
+
+
+@app.route('/lock/release', methods=['POST'])
+def lock_release():
+    # Pull the user information from the parameters
+    data = request.get_json()
+    uuid = data.get('uuid')
+    auth = data.get('auth')
+    key = data.get('key')
+
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth):
+        return 'Unauthorized', 440
+
+    # Attempt to release the lock
+    success, status = EXO_DATABASE.release_lock(uuid, key)
+
+    # Return the result
+    if success:
+        return jsonify({"status": "success"}), 200
+    elif status == 404:
+        return jsonify({"status": "no_lock"}), 200
+    elif status == 403:
+        return jsonify({"status": "bad_key"}), 200
+    return jsonify({"status": "fail"}), 400
+
+
 @app.route('/node', methods=['GET'])
 def route_get_node():
     # Pull the user information from the parameters
@@ -210,8 +258,14 @@ def route_post_node():
     sandbox = UPLOAD_FOLDER / uuid
     staging = sandbox / 'staging'
 
-    # Extract the request details and file payload
+    # Validate the lock if not uploading a single chunk
     details = json.loads(request.form['details'])
+    if details.get('root') or 'stale' in details:
+        lock_key = details.get('lock_key')
+        if not lock_key or not EXO_DATABASE.verify_lock(uuid, lock_key):
+            return 'Active lock required for tree mutation', 423
+
+    # Extract the request details and file payload
     file_obj = request.files.get('blob') or request.files.get('chunk')
     if not file_obj:
         return 'Missing file payload', 400
@@ -293,17 +347,22 @@ def route_delete_node():
     uuid = request.args.get('uuid')
     auth = request.args.get('auth')
     checksum = request.args.get('hash')
+    lock_key = request.args.get('lock_key')
 
     # Validate the auth
     if not EXO_DATABASE.check_token(uuid, auth):
         return 'Unauthorized', 440
-    sandbox = UPLOAD_FOLDER / uuid
+
+    # Validate the lock
+    if not lock_key or not EXO_DATABASE.verify_lock(uuid, lock_key):
+        return 'Active lock required for deletion', 423
 
     # Determine which checksum to delete
     if checksum == 'root':
         return '', 403
 
     # TODO: Possible attack vector... what if there is a bad checksum?
+    sandbox = UPLOAD_FOLDER / uuid
     delete_file(sandbox, checksum)
     return '', 204
 

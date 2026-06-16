@@ -54,6 +54,14 @@ class ExoDatabase:
                     created_at INTEGER NOT NULL
                 )
             ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS locks (
+                    uuid      TEXT PRIMARY KEY,
+                    key       TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    expires   INTEGER NOT NULL
+                )
+            ''')
         self.conn.commit()
 
     def _uuid_exists(self, uuid):
@@ -210,6 +218,70 @@ class ExoDatabase:
         self.conn.commit()
         return True
 
+    def acquire_lock(self, uuid, key):
+        current_time = int(time())
+        lock_expires = current_time + 60
+
+        with self.get_cursor() as cursor:
+            # Check if lock exists for the uuid
+            cursor.execute('''
+                SELECT key, expires FROM locks
+                WHERE uuid = ?
+            ''', (uuid,))
+            row = cursor.fetchone()
+
+            # If there is a non-expired lock, deny
+            if row is not None:
+                _, expires = row
+                if expires > current_time:
+                    return False, 409
+
+            # Insert or replace the lock
+            cursor.execute('''
+                INSERT OR REPLACE INTO locks (uuid, key, created_at, expires)
+                VALUES (?, ?, ?, ?)
+            ''', (uuid, key, current_time, lock_expires))
+        self.conn.commit()
+        return True, 200
+
+    def release_lock(self, uuid, key):
+        current_time = int(time())
+
+        with self.get_cursor() as cursor:
+            # Check if lock exists for the uuid
+            cursor.execute('''
+                SELECT key, expires FROM locks
+                WHERE uuid = ?
+            ''', (uuid,))
+            row = cursor.fetchone()
+            if row is None:
+                return False, 404
+
+            # Verify key matches
+            existing_key, _ = row
+            if existing_key != key:
+                return False, 403
+
+            # Delete the lock
+            cursor.execute('''
+                DELETE FROM locks
+                WHERE uuid = ?
+            ''', (uuid,))
+        self.conn.commit()
+        return True, 200
+
+    def verify_lock(self, uuid, key):
+        current_time = int(time())
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                SELECT key, expires FROM locks
+                WHERE uuid = ?
+            ''', (uuid,))
+            row = cursor.fetchone()
+
+            if row is None or row[1] < current_time:
+                return False
+            return row[0] == key
 
 """
 Create a new file with file-sharding
