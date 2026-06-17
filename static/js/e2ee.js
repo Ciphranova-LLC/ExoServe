@@ -11,6 +11,7 @@ class MerkleMutex {
         this._lockKey = null;
         this._uuid = sessionStorage.getItem('uuid');
         this._auth = sessionStorage.getItem('auth_token');
+        this._version = null;
     }
 
     _generateKey() {
@@ -46,6 +47,7 @@ class MerkleMutex {
 
                 if (data.status === 'success') {
                     this._lockKey = key;
+                    this._version = data.version || null;
                     return;
                 } else if (data.status === 'busy') {
                     retries++;
@@ -63,17 +65,41 @@ class MerkleMutex {
         }
     }
 
-    async acquire() {
+    async acquire(crumbs) {
+        // If no crumbs, just acquire the lock without validation (first page load)
+        if (!crumbs || crumbs.length === 0) {
+            const wasLocked = this._locked;
+            this._locked = true;
+            if (wasLocked) {
+                await new Promise((resolve) => {
+                    this._queue.push(resolve);
+                });
+            }
+            try {
+                await this._tryLock();
+            } catch (error) {
+                this._locked = false;
+                throw error;
+            }
+            return;
+        }
+
         // Claim the lock synchronously to prevent queue-jumping
         const wasLocked = this._locked;
         this._locked = true;
-
         if (wasLocked) {
             await new Promise((resolve) => {
                 this._queue.push(resolve);
             });
         }
-        await this._tryLock();
+
+        try {
+            await this._tryLock();
+            await breadcrumbs_syncPathFromServer(crumbs, this._version);
+        } catch (error) {
+            this._locked = false;
+            throw error;
+        }
     }
 
     async release() {
@@ -103,6 +129,7 @@ class MerkleMutex {
             console.error('MerkleMutex: Network error during lock release.', error);
         } finally {
             this._lockKey = null;
+            this._version = null;
 
             if (this._queue.length > 0) {
                 const nextTask = this._queue.shift();
@@ -151,7 +178,7 @@ async function __e2ee_uploadFile(file, crumbs, createToast = true) {
 // Helper function to ensure a folder exists
 async function __e2ee_ensureFolderExists(folderName, crumbs) {
     // Acquire lock so this is actually valid
-    await treeLock.acquire();
+    await treeLock.acquire(crumbs);
 
     try {
         // Get the youngest crumb and its data
@@ -196,7 +223,7 @@ async function __e2ee_ensureFolderExists(folderName, crumbs) {
 
 // Helper function to conditionally reload the table view
 async function __e2ee_refreshTableView(crumbs) {
-    await treeLock.acquire();
+    await treeLock.acquire(crumbs);
 
     try {
         const activeCrumb = crumbs[crumbs.length - 1];
@@ -215,7 +242,13 @@ async function __e2ee_refreshTableView(crumbs) {
 
         if (isActiveFolder) {
             const keyObj = await e2ee_parseKey(KeyType.B64, finalKey);
-            filetable_goToFolder(finalHash, keyObj, finalName, false);
+            await filetable_goToFolder(
+                finalHash,
+                keyObj,
+                finalName,
+                (updateBreadCrumbs = false),
+                (hasLock = true)
+            );
         }
     } finally {
         await treeLock.release();
@@ -564,9 +597,7 @@ async function e2ee_newFolder(
 
     // If mutating the root pointer, ensure lock
     const needToAcquireLock = isRoot && !hasLock;
-    if (needToAcquireLock) {
-        await treeLock.acquire();
-    }
+    if (needToAcquireLock) await treeLock.acquire(crumbs);
 
     let keyBase64 = null;
     let newParentHash = null;
@@ -718,7 +749,7 @@ async function e2ee_walkMerkleTree(
     if (crumbs.length === 0) return null;
 
     // Do not allow concurrent walkers
-    if (!hasLock) await treeLock.acquire();
+    if (!hasLock) await treeLock.acquire(crumbs);
 
     let returnHash = null;
     try {

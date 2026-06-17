@@ -185,9 +185,12 @@ def lock_acquire():
     # Attempt to acquire the lock
     success, status = EXO_DATABASE.acquire_lock(uuid, key)
 
+    # Get the root hash so the client knows the version they are modifying
+    root_hash = EXO_DATABASE.get_root_hash(uuid)
+
     # Return the result
-    if success:
-        return jsonify({"status": "success"}), 200
+    if success and root_hash:
+        return jsonify({"status": "success", "version": root_hash}), 200
     elif status == 409:
         return jsonify({"status": "busy"}), 200
     return jsonify({"status": "fail"}), 400

@@ -17,6 +17,7 @@ async function breadcrumbs_append(folderHash, keyObj, folderName) {
     head.setAttribute('class', 'crumb');
     head.setAttribute('data-hash', folderHash);
     head.setAttribute('data-key', folderKey);
+    head.setAttribute('data-name', folderName);
     head.appendChild(span);
     span.appendChild(text);
     breadcrumb_elem.appendChild(head);
@@ -25,19 +26,18 @@ async function breadcrumbs_append(folderHash, keyObj, folderName) {
     // Then go to that folder, but do not update the breadcrumbs
     const staleHead = document.querySelector('.crumb:nth-last-child(2)');
     if (staleHead) {
-        staleHead.onclick = function () {
+        staleHead.onclick = async function () {
             const targetHash = this.getAttribute('data-hash');
             const targetKey = this.getAttribute('data-key');
-            const targetName = this.innerText;
+            const targetName = this.getAttribute('data-name');
+            const keyObj = await e2ee_parseKey(KeyType.B64, targetKey);
+            await filetable_goToFolder(targetHash, keyObj, targetName, (updateBreadcrumbs = false));
             let nextNode = this.nextElementSibling;
             while (nextNode) {
                 let nodeToRemove = nextNode;
                 nextNode = nextNode.nextElementSibling;
                 nodeToRemove.remove();
             }
-            e2ee_parseKey(KeyType.B64, targetKey).then((keyObj) =>
-                filetable_goToFolder(targetHash, keyObj, targetName, (updateBreadcrumbs = false))
-            );
         };
     }
 }
@@ -50,6 +50,53 @@ function breadcrumbs_clear() {
             let nextNode = currNode.nextElementSibling;
             currNode.remove();
             currNode = nextNode;
+        }
+    }
+}
+
+async function breadcrumbs_syncPathFromServer(crumbs, version) {
+    // Refuse if there are no crumbs
+    if (!crumbs || crumbs.length === 0) return;
+
+    // Validate that updates need to be performed
+    const rootCrumb = crumbs[0];
+    const rootHash = rootCrumb.getAttribute('data-hash');
+    if (rootHash === version) {
+        return;
+    }
+
+    // Update the root hash
+    rootCrumb.setAttribute('data-hash', version);
+
+    // Fetch root folder using server version hash
+    const rootKeyBase64 = rootCrumb.getAttribute('data-key');
+    const rootKeyObj = await e2ee_parseKey(KeyType.B64, rootKeyBase64);
+    let currentHash = version;
+    let currentFolder = await e2ee_fetchFolder(currentHash, rootKeyObj);
+
+    // Walk through each crumb and update its hash
+    for (let i = 0; i < crumbs.length; i++) {
+        const crumb = crumbs[i];
+
+        // Update this crumb's hash to match current folder
+        crumb.setAttribute('data-hash', currentHash);
+
+        // Navigate deeper if there's a next crumb
+        if (i < crumbs.length - 1) {
+            // Look for the next crumb's name in the current folder's children
+            const nextCrumb = crumbs[i + 1];
+            const nextCrumbName =
+                nextCrumb.getAttribute('data-name') || nextCrumb.textContent.trim();
+
+            if (currentFolder.children && currentFolder.children[nextCrumbName]) {
+                const childMeta = currentFolder.children[nextCrumbName];
+                currentHash = childMeta.hash;
+                const childKeyObj = await e2ee_parseKey(KeyType.B64, childMeta.key);
+                currentFolder = await e2ee_fetchFolder(currentHash, childKeyObj);
+            } else {
+                console.error(`breadcrumbs_syncPathFromServer: Path broken at "${nextCrumbName}"`);
+                throw new Error(`Breadcrumb path invalid: "${nextCrumbName}" not found`);
+            }
         }
     }
 }

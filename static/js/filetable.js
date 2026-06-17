@@ -1,6 +1,7 @@
 // State variables and helpers for sorting the table
 let filetable_currSortHdr = null;
 let filetable_currSortAsc = true;
+
 const filetable_getCellValue = (tr, idx) => {
     const cell = tr.children[idx];
     return cell.getAttribute('data-sort') || cell.innerText || cell.textContent;
@@ -171,20 +172,65 @@ function filetable_applyRowCheckboxesListeners() {
     });
 }
 
-function filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs = true) {
-    e2ee_fetchFolder(hash, keyObj).then((folderJson) => {
-        filetable_build(folderJson);
+async function filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs = true, hasLock = false) {
+    // Get the hash of the current folder
+    const currentCrumbs = breadcrumb_elem.children;
+    const hereCrumb_1 = currentCrumbs[currentCrumbs.length - 1];
+    const hereHash_1 =
+        hereCrumb_1 === undefined ? undefined : hereCrumb_1.getAttribute('data-hash');
+
+    // Determine if navigating to a child or parent
+    const crumbTargetI = Array.from(currentCrumbs).findIndex(
+        (crumb) => crumb.getAttribute('data-hash') === hash
+    );
+
+    // Acquire a lock if one is not already had
+    if (!hasLock) await treeLock.acquire(currentCrumbs);
+
+    try {
+        // Get the crumb and hash again, as they might have changed after acquiring a lock
+        const hereCrumb_2 = currentCrumbs[currentCrumbs.length - 1];
+        const hereHash_2 =
+            hereCrumb_2 === undefined ? undefined : hereCrumb_2.getAttribute('data-hash');
+
+        // If the current folder changed after acquiring a lock, swap
+        if (hereHash_1 !== hereHash_2) {
+            const hereKey = hereCrumb_2.getAttribute('data-key');
+            const hereKeyObj = await e2ee_parseKey(KeyType.B64, hereKey);
+            const hereFolderJson = await e2ee_fetchFolder(hereHash_2, hereKeyObj);
+
+            // Swap parameters via breadcrumb
+            if (crumbTargetI >= 0) {
+                const targetMeta = breadcrumb_elem.children[crumbTargetI];
+                hash = targetMeta.getAttribute('data-hash');
+                keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.getAttribute('data-key'));
+            }
+
+            // Swap parameters via child
+            else {
+                const targetMeta = hereFolderJson.children[name];
+                hash = targetMeta.hash;
+                keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.key);
+            }
+        }
+
+        // Fetch the folder and build the table
+        const targetFolderJson = await e2ee_fetchFolder(hash, keyObj);
+        filetable_build(targetFolderJson);
         if (updateBreadcrumbs) breadcrumbs_append(hash, keyObj, name);
-    });
+    } catch (error) {
+        console.error('Navigation failed:', error);
+        throw error;
+    } finally {
+        if (!hasLock) await treeLock.release();
+    }
 }
 
-function filetable_goToFolderElem(elem, updateBreadcrumbs = true) {
+async function filetable_goToFolderElem(elem, updateBreadcrumbs = true) {
     const hash = elem.getAttribute('data-hash');
-    const key = elem.getAttribute('data-key');
     const name = elem.getAttribute('data-name');
-    e2ee_parseKey(KeyType.B64, key).then((keyObj) =>
-        filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs)
-    );
+    const keyObj = await e2ee_parseKey(KeyType.B64, elem.getAttribute('data-key'));
+    await filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
