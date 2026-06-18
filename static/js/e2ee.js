@@ -157,6 +157,30 @@ function escapeHtml(str) {
     );
 }
 
+// Helper to detach background tasks from live UI DOM elements
+function __e2ee_createVirtualCrumbs(domCrumbs) {
+    return Array.from(domCrumbs).map((c) => {
+        let vHash = c.getAttribute('data-hash');
+        let vKey = c.getAttribute('data-key');
+        let vName = c.getAttribute('data-name') || c.innerText || c.textContent;
+
+        return {
+            innerText: vName,
+            textContent: vName,
+            getAttribute: (attr) => {
+                if (attr === 'data-hash') return vHash;
+                if (attr === 'data-key') return vKey;
+                if (attr === 'data-name') return vName;
+                return null;
+            },
+            setAttribute: (attr, val) => {
+                if (attr === 'data-hash') vHash = val;
+                if (attr === 'data-key') vKey = val;
+            },
+        };
+    });
+}
+
 // Helper function to upload a file that has already been selected
 async function __e2ee_uploadFile(file, crumbs, createToast = true) {
     // Stream the encrypted file to the server
@@ -232,13 +256,7 @@ async function __e2ee_refreshTableView() {
         const activeKey = activeCrumb.getAttribute('data-key');
         const activeName = activeCrumb.innerText;
         const keyObj = await e2ee_parseKey(KeyType.B64, activeKey);
-        await filetable_goToFolder(
-            activeHash,
-            keyObj,
-            activeName,
-            (updateBreadCrumbs = false),
-            (hasLock = true)
-        );
+        await filetable_goToFolder(activeHash, keyObj, activeName, false, true);
     } finally {
         await treeLock.release();
     }
@@ -423,7 +441,8 @@ async function e2ee_uploadFile(crumbs) {
         if (!file) return;
 
         try {
-            await __e2ee_uploadFile(file, crumbs);
+            const virtualCrumbs = e2ee_createVirtualCrumbs(crumbs);
+            await __e2ee_uploadFile(file, virtualCrumbs);
             await __e2ee_refreshTableView();
         } catch (e) {
             console.error(e);
@@ -456,6 +475,10 @@ async function e2ee_uploadFolder(crumbs) {
             for (let i = 0; i < files.length; i++) totalSize += files[i].size;
 
             let uploadedSize = 0;
+
+            // Detach base crumbs from live UI before the loop begins
+            const virtualBaseCrumbs = __e2ee_createVirtualCrumbs(crumbs);
+
             for (let i = 0; i < files.length; i++) {
                 // Update the progress UI
                 const file = files[i];
@@ -466,8 +489,8 @@ async function e2ee_uploadFolder(crumbs) {
                 const actualFileName = pathParts.pop();
                 const nestedFolders = pathParts;
 
-                // Build a localized crumb trail
-                let currentCrumbs = [...crumbs];
+                // Build a localized crumb trail from the detached virtual base
+                let currentCrumbs = [...virtualBaseCrumbs];
                 for (const folderName of nestedFolders) {
                     const { hash, key } = await __e2ee_ensureFolderExists(
                         folderName,

@@ -198,24 +198,26 @@ async function filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs = true
             const hereHash_2 =
                 hereCrumb_2 === undefined ? undefined : hereCrumb_2.getAttribute('data-hash');
 
-            // If the current folder changed after acquiring a lock, swap
-            if (hereHash_1 !== hereHash_2) {
+            // Always swap parameters via breadcrumb navigating backwards
+            // parent hashes can change even if the current active child hash did not
+            if (crumbTargetI >= 0) {
+                const targetMeta = breadcrumb_elem.children[crumbTargetI];
+                hash = targetMeta.getAttribute('data-hash');
+                keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.getAttribute('data-key'));
+            }
+
+            // If navigating to a child, only swap if the current folder's hash changed
+            else if (hereHash_1 !== hereHash_2) {
                 const hereKey = hereCrumb_2.getAttribute('data-key');
                 const hereKeyObj = await e2ee_parseKey(KeyType.B64, hereKey);
                 const hereFolderJson = await e2ee_fetchFolder(hereHash_2, hereKeyObj);
 
-                // Swap parameters via breadcrumb
-                if (crumbTargetI >= 0) {
-                    const targetMeta = breadcrumb_elem.children[crumbTargetI];
-                    hash = targetMeta.getAttribute('data-hash');
-                    keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.getAttribute('data-key'));
-                }
-
-                // Swap parameters via child
-                else {
-                    const targetMeta = hereFolderJson.children[name];
+                const targetMeta = hereFolderJson.children[name];
+                if (targetMeta) {
                     hash = targetMeta.hash;
                     keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.key);
+                } else {
+                    throw new Error(`Target folder "${name}" no longer exists.`);
                 }
             }
 
