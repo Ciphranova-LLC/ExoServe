@@ -139,19 +139,7 @@ async function keyhandler_register(username, password, salt) {
     const uuid = await keyhandler_generateUuidv8(username);
 
     // Send the UUID, salt, the public key, and the encrypted private key
-    return await fetch('/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            uuid: uuid,
-            salt: btoa(String.fromCharCode(...new Uint8Array(salt))),
-            public_key: pubKeyPem,
-            private_key: {
-                iv: btoa(String.fromCharCode(...iv)),
-                data: btoa(String.fromCharCode(...new Uint8Array(encPrivKey))),
-            },
-        }),
-    });
+    return await network_register(uuid, salt, pubKeyPem, encPrivKey, iv);
 }
 
 async function keyhandler_login(username, password) {
@@ -159,13 +147,7 @@ async function keyhandler_login(username, password) {
     const uuid = await keyhandler_generateUuidv8(username);
 
     // Request a challenge from the server
-    let res = await fetch('/auth/challenge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            uuid: uuid,
-        }),
-    });
+    let res = await network_authChallenge(uuid);
 
     // It's possible the server encounters some issue
     // But it should always return key material, even if the UUID doesn't exist
@@ -206,15 +188,7 @@ async function keyhandler_login(username, password) {
         const signature = await window.crypto.subtle.sign('RSASSA-PKCS1-v1_5', keyPair, nonce);
 
         // Submit the signed nonce
-        return await fetch('/auth/submit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                uuid: uuid,
-                nonce: data['nonce'],
-                signature: btoa(String.fromCharCode(...new Uint8Array(signature))),
-            }),
-        });
+        return await network_authSubmit(uuid, data['nonce'], signature);
     } catch (e) {
         return null;
     }
@@ -242,22 +216,20 @@ async function keyhandler_check() {
         if (window.location.pathname != '/login' && window.location.pathname != '/signup')
             window.location.href = '/login';
     }
+    const keyObj = await e2ee_parseKey(KeyType.ROOT);
 
-    // Acquire a lock early since there is a lot to check
+    // Create a root node if one does not exist (pre-lock for new accounts)
+    const res = await network_nodeGet(uuid, authToken, 'root', true);
+    if (res.status == 204) await e2ee_newFolder(keyObj, 'Home', [], true);
+
+    // Now a lock is acquired to ensure a valid root node is loaded
     await treeLock.acquire([]);
     try {
         // Attempt to get the root node
-        res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&raw=true`, {
-            method: 'GET',
-        });
+        const res = await network_nodeGet(uuid, authToken, 'root', true);
 
-        // Get the root key
-        const keyObj = await e2ee_parseKey(KeyType.ROOT);
-
-        // If the root node does not exist, create one
-        if (res.status == 204) {
-            rootHash = (await e2ee_newFolder(keyObj, 'Home', [], true))['hash'];
-        } else if (res.status == 200) {
+        // Check for an expired session
+        if (res.status == 200) {
             rootHash = (await res.json())['root'];
         } else if (res.status === 440) {
             sessionStorage.removeItem('uuid');

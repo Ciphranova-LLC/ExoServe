@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import urllib.parse
 
 from base64 import b64encode, b64decode
 from cryptography.hazmat.primitives import serialization, hashes
@@ -221,20 +222,21 @@ def lock_release():
     return jsonify({"status": "fail"}), 400
 
 
-@app.route('/node', methods=['GET'])
-def route_get_node():
-    # Pull the user information from the parameters
-    uuid = request.args.get('uuid')
-    auth = request.args.get('auth')
-    checksum = request.args.get('hash')
+@app.route('/node/<uuid>/<checksum>', methods=['GET'])
+def route_get_node(uuid, checksum):
+    # Extract the auth token from the header
+    auth_header = request.headers.get('Authorization')
+    auth_token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        auth_token = auth_header[7:]
 
     # Validate the auth
-    if not EXO_DATABASE.check_token(uuid, auth):
+    if not EXO_DATABASE.check_token(uuid, auth_token):
         return 'Unauthorized', 440
     sandbox = UPLOAD_FOLDER / uuid
 
     # If there is no checksum, assume the client wants the root checksum
-    if checksum is None:
+    if checksum == 'root':
         root_hash = EXO_DATABASE.get_root_hash(uuid)
         status = 200 if root_hash is not None else 204
         return jsonify({
@@ -252,8 +254,9 @@ def route_get_node():
 @app.route('/node', methods=['POST'])
 def route_post_node():
     # Pull the user information from the form
-    uuid = request.form['uuid']
-    auth = request.form['auth']
+    details = json.loads(request.form['details'])
+    uuid = details.get('uuid')
+    auth = details.get('auth')
 
     # Validate the auth
     if not EXO_DATABASE.check_token(uuid, auth):
@@ -262,14 +265,15 @@ def route_post_node():
     staging = sandbox / 'staging'
 
     # Validate the lock if not uploading a single chunk
-    details = json.loads(request.form['details'])
+    # Bypassed if there is no root node yet
     if details.get('root') or 'stale' in details:
         lock_key = details.get('lock_key')
-        if not lock_key or not EXO_DATABASE.verify_lock(uuid, lock_key):
+        root_hash = EXO_DATABASE.get_root_hash(uuid)
+        if root_hash and (not lock_key or not EXO_DATABASE.verify_lock(uuid, lock_key)):
             return 'Active lock required for tree mutation', 423
 
     # Extract the request details and file payload
-    file_obj = request.files.get('blob') or request.files.get('chunk')
+    file_obj = request.files.get('blob')
     if not file_obj:
         return 'Missing file payload', 400
     payload_data = file_obj.read()
@@ -344,16 +348,20 @@ def route_post_node():
     return jsonify({"status": "success"}), 200
 
 
-@app.route('/node', methods=['DELETE'])
-def route_delete_node():
-    # Pull the user information from the form
-    uuid = request.args.get('uuid')
-    auth = request.args.get('auth')
-    checksum = request.args.get('hash')
-    lock_key = request.args.get('lock_key')
+@app.route('/node/<uuid>/<checksum>', methods=['DELETE'])
+def route_delete_node(uuid, checksum):
+    # Extract the auth token from the header
+    auth_header = request.headers.get('Authorization')
+    auth_token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        auth_token = auth_header[7:]
+
+    # Extract the lock key from the header
+    lock_key = request.headers.get('X-Lock-Key')
+    lock_key = urllib.parse.unquote(lock_key.replace('+', ' '))
 
     # Validate the auth
-    if not EXO_DATABASE.check_token(uuid, auth):
+    if not EXO_DATABASE.check_token(uuid, auth_token):
         return 'Unauthorized', 440
 
     # Validate the lock

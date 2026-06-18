@@ -1,5 +1,6 @@
 // Key in use
 const ivCache = new Map();
+const tokenMap = new Map();
 
 // Constants
 const CHUNK_P_SIZE = 5 * 1024 * 1024; // 5MB Plaintext Chunk
@@ -30,6 +31,27 @@ self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
 
+    if (url.pathname === '/arm-worker' && event.request.method === 'POST') {
+        event.respondWith(
+            (async () => {
+                try {
+                    const data = await event.request.json();
+                    if (data.hash && data.authToken) {
+                        tokenMap.set(data.hash, `Bearer ${data.authToken}`);
+                        return new Response(JSON.stringify({ success: true }), {
+                            status: 200,
+                            headers: { 'Content-Type': 'application/json' },
+                        });
+                    }
+                    return new Response('Missing hash or token', { status: 400 });
+                } catch (e) {
+                    return new Response('Invalid JSON payload', { status: 400 });
+                }
+            })()
+        );
+        return;
+    }
+
     // The File Routes
     if (url.pathname.includes('/node') && event.request.method === 'GET') {
         // Bypass the Service Worker if the UI requests raw encrypted bytes
@@ -40,22 +62,37 @@ self.addEventListener('fetch', (event) => {
     }
 });
 
+// Safely extract the hash from either query params or the URL path
+function extractHashFromUrl(urlObj) {
+    let hash = urlObj.searchParams.get('hash');
+    if (!hash) {
+        const parts = urlObj.pathname.split('/');
+        let lastPart = parts.pop();
+        hash = lastPart.split('?')[0];
+    }
+
+    return hash;
+}
+
 // Get the key used for a specific request
 async function getKeyForRequest(urlObj) {
-    const hash = urlObj.searchParams.get('hash');
+    const hash = extractHashFromUrl(urlObj);
     if (!hash) return null;
     return await keyDB.getKey(hash);
 }
 
 // Wholly decrypt a non-streamed file
-async function decryptWhole(cleanServerUrl, clientId, filename) {
+async function decryptWhole(cleanServerUrl, clientId, filename, authHeader) {
+    // Configure headers to forward Authorization if it exists
+    const fetchHeaders = authHeader ? { Authorization: authHeader } : {};
+
     // Validate there is a key
     const activeDecryptionKey = await getKeyForRequest(new URL(cleanServerUrl));
-    if (!activeDecryptionKey) return fetch(cleanServerUrl);
+    if (!activeDecryptionKey) return fetch(cleanServerUrl, { headers: fetchHeaders });
 
     // Get the extension from the clean URL
     const ext = cleanServerUrl.split('.').pop().toLowerCase();
-    const res = await fetch(cleanServerUrl);
+    const res = await fetch(cleanServerUrl, { headers: fetchHeaders });
     if (!res.ok) return res;
 
     // Try to download
@@ -129,6 +166,12 @@ async function handleDecryption(request, clientId) {
     const ext = (urlObj.searchParams.get('ext') || urlObj.pathname.split('.').pop()).toLowerCase();
     const isVideo = ['mp4', 'webm', 'ogg'].includes(ext);
 
+    // Get the hash of the file being decrypted
+    const hash = extractHashFromUrl(urlObj);
+
+    // Look up the auth header
+    const authHeader = request.headers.get('Authorization') || tokenMap.get(hash);
+
     // Get the file name before stripping
     const filename = urlObj.searchParams.get('filename');
 
@@ -144,7 +187,7 @@ async function handleDecryption(request, clientId) {
 
     // Wholly decrypt non-video
     if (!isVideo) {
-        return decryptWhole(cleanServerUrl, clientId, filename);
+        return decryptWhole(cleanServerUrl, clientId, filename, authHeader);
     }
 
     // Stream decrypt videos
@@ -164,7 +207,11 @@ async function handleDecryption(request, clientId) {
             totalEncryptedSize = cached.totalEncryptedSize;
         } else {
             // Request just the 12-byte File IV
-            const ivRes = await fetch(cleanServerUrl, { headers: { Range: 'bytes=0-11' } });
+            const ivHeaders = new Headers(request.headers);
+            ivHeaders.set('Range', 'bytes=0-11');
+            if (authHeader) ivHeaders.set('Authorization', authHeader);
+
+            const ivRes = await fetch(cleanServerUrl, { headers: ivHeaders });
 
             // If the server did not like the request, emit an error
             if (!ivRes.ok) {
@@ -221,8 +268,12 @@ async function handleDecryption(request, clientId) {
         const serverEnd = Math.min(serverStart + CHUNK_E_SIZE - 1, totalEncryptedSize - 1);
 
         // Fetch the encrypted chunk
+        const chunkHeaders = new Headers(request.headers);
+        chunkHeaders.set('Range', `bytes=${serverStart}-${serverEnd}`);
+        if (authHeader) chunkHeaders.set('Authorization', authHeader);
+
         let chunkRes = await fetch(cleanServerUrl, {
-            headers: { Range: `bytes=${serverStart}-${serverEnd}` },
+            headers: chunkHeaders,
         });
         let encryptedChunk = await chunkRes.arrayBuffer();
 

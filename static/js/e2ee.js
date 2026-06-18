@@ -29,15 +29,7 @@ class MerkleMutex {
         while (true) {
             const key = this._generateKey();
             try {
-                const res = await fetch('/lock/acquire', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        uuid: this._uuid,
-                        auth: this._auth,
-                        key: key,
-                    }),
-                });
+                const res = await network_lockAcquire(this._uuid, this._auth, key);
 
                 if (!res.ok) {
                     throw new Error(`Lock acquire network error: ${res.status}`);
@@ -109,15 +101,7 @@ class MerkleMutex {
         }
 
         try {
-            const res = await fetch('/lock/release', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    uuid: this._uuid,
-                    auth: this._auth,
-                    key: this._lockKey,
-                }),
-            });
+            const res = await network_lockRelease(this._uuid, this._auth, this._lockKey);
 
             if (!res.ok) throw new Error(`Lock release network error: ${res.status}`);
 
@@ -263,8 +247,29 @@ async function __e2ee_refreshTableView() {
 }
 
 // Arm the service worker with a key
-async function e2ee_armWorker(keyObj, hash) {
+async function e2ee_armWorker(keyObj, hash, auth) {
+    // Store the key in IndexedDB
     await keyDB.setActiveKey(keyObj, hash);
+
+    // Send the token to the Service Worker's memory
+    try {
+        const res = await fetch('/arm-worker', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                hash: hash,
+                authToken: auth,
+            }),
+        });
+
+        if (!res.ok) {
+            console.error('Failed to arm worker with auth token');
+        }
+    } catch (e) {
+        console.error('Network error arming worker:', e);
+    }
 }
 
 // Parse the key in memory
@@ -339,22 +344,26 @@ async function e2ee_uploadFileChunked(file, createToast = true) {
     let progressToast = null;
     if (createToast) progressToast = ui_createProgressToast(file.name);
 
+    // Initialize the details shared by each chunk
+    let detailsObj = {
+        id: id,
+        uuid: sessionStorage.getItem('uuid'),
+        auth: sessionStorage.getItem('auth_token'),
+    };
+
     // For each chunk of the file...
     for (let i = 0; i < totalChunks; i++) {
         const start = i * CHUNK_SIZE;
         const end = Math.min(start + CHUNK_SIZE, file.size);
 
-        // Initialize the chunk upload details
-        let detailsObj = {
-            id: id,
-            chunk_index: i,
-        };
+        // Update the chunk-specific details
+        detailsObj['chunk_index'] = i;
 
         // Read the chunk into RAM
         const chunkBlob = file.slice(start, end);
         const chunkBuffer = await chunkBlob.arrayBuffer();
 
-        // Calculate Deterministic Chunk IV (File IV + Chunk Index)
+        // Calculate deterministic chunk IV (file IV + chunk index)
         const chunkIv = new Uint8Array(12);
         chunkIv.set(fileIv);
         const view = new DataView(chunkIv.buffer);
@@ -369,7 +378,7 @@ async function e2ee_uploadFileChunked(file, createToast = true) {
             chunkBuffer
         );
 
-        // Prepend the 12-byte File IV to the first chunk
+        // Prepend the 12-byte file IV to the first chunk
         let payload;
         if (i === 0) {
             payload = new Uint8Array(12 + encryptedChunk.byteLength);
@@ -396,19 +405,8 @@ async function e2ee_uploadFileChunked(file, createToast = true) {
             detailsObj['checksum'] = finalHexHash;
         }
 
-        // Create the form data
-        let details = JSON.stringify(detailsObj);
-        const formData = new FormData();
-        formData.append('chunk', new Blob([payload], { type: 'application/octet-stream' }));
-        formData.append('details', details);
-        formData.append('uuid', sessionStorage.getItem('uuid'));
-        formData.append('auth', sessionStorage.getItem('auth_token'));
-
         // Perform the upload
-        const res = await fetch('/node', {
-            method: 'POST',
-            body: formData,
-        });
+        const res = await network_nodePost(payload, detailsObj);
         if (!res.ok) {
             if (progressToast) progressToast.error('Upload failed');
             throw new Error(`Failed to upload chunk ${i} of ${file.name}`);
@@ -574,7 +572,7 @@ async function e2ee_fetchFolder(id, keyObj, data = null) {
     const authToken = sessionStorage.getItem('auth_token');
 
     // Fetch raw bytes
-    const res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${id}&raw=true`);
+    const res = await network_nodeGet(uuid, authToken, id, true);
     if (!res.ok) throw new Error('Failed to fetch folder from server');
 
     // Decrypt in the main thread
@@ -615,27 +613,13 @@ async function e2ee_newFolder(
     let newParentHash = null;
 
     try {
-        // Create the upload details
-        let details = JSON.stringify({
+        // Make request to create the new folder
+        const res = await network_nodePost(combinedData['data'], {
             root: isRoot,
             checksum: combinedData['hash'],
             lock_key: treeLock._lockKey,
-        });
-
-        // Create the form
-        const formData = new FormData();
-        formData.append(
-            'blob',
-            new Blob([combinedData['data']], { type: 'application/octet-stream' })
-        );
-        formData.append('details', details);
-        formData.append('uuid', sessionStorage.getItem('uuid'));
-        formData.append('auth', sessionStorage.getItem('auth_token'));
-
-        // Make request to create the new folder
-        const res = await fetch('/node', {
-            method: 'POST',
-            body: formData,
+            uuid: sessionStorage.getItem('uuid'),
+            auth: sessionStorage.getItem('auth_token'),
         });
 
         if (!res.ok) {
@@ -680,12 +664,12 @@ async function e2ee_newFolder(
 
 // Download, decrypt, and preview a file
 async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
-    // Arm the service worker
-    await e2ee_armWorker(decryptKey, hash);
-
     // Get the Session Storage items
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
+
+    // Arm the service worker
+    await e2ee_armWorker(decryptKey, hash, authToken);
 
     // Initialize the nested HTML
     let html = `<h2>${filename}</h2>`;
@@ -696,7 +680,7 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
 
         // Streaming from service worker for videos
         if (VIDEO_EXTENSIONS.includes(ext)) {
-            const videoUrl = `/node?uuid=${uuid}&auth=${authToken}&hash=${hash}&ext=${ext}`;
+            const videoUrl = `/node/${uuid}/${hash}?ext=${ext}`;
             html += `<video id="preview-content" controls>
                     <source src="${videoUrl}" type="video/${ext}"></video>`;
         }
@@ -704,7 +688,7 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
         // Whole-file from service worker for everything else
         else {
             // Download
-            const res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}`);
+            const res = await network_nodeGet(uuid, authToken, hash);
             if (!res.ok) {
                 const errorBody = await res.text();
                 throw new Error(errorBody || `HTTP Error ${res.status}: Download failed`);
@@ -823,23 +807,13 @@ async function e2ee_walkMerkleTree(
             }
 
             // Upload the new parent to the server
-            const details = JSON.stringify({
+            await network_nodePost(combinedData['data'], {
                 root: isRoot,
                 checksum: newParentHash,
                 stale: parentHash,
                 lock_key: treeLock._lockKey,
-            });
-            const formData = new FormData();
-            formData.append(
-                'blob',
-                new Blob([combinedData['data']], { type: 'application/octet-stream' })
-            );
-            formData.append('details', details);
-            formData.append('uuid', sessionStorage.getItem('uuid'));
-            formData.append('auth', sessionStorage.getItem('auth_token'));
-            await fetch('/node', {
-                method: 'POST',
-                body: formData,
+                uuid: sessionStorage.getItem('uuid'),
+                auth: sessionStorage.getItem('auth_token'),
             });
 
             // Shift the scope to the next breadcrumb
@@ -882,9 +856,7 @@ async function e2ee_deleteNode(hash, type, keyObj) {
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
     const lockKey = encodeURIComponent(treeLock._lockKey);
-    await fetch(`/node?uuid=${uuid}&auth=${authToken}&hash=${hash}&lock_key=${lockKey}`, {
-        method: 'DELETE',
-    });
+    await network_nodeDelete(uuid, authToken, hash, lockKey);
 
     // Delete the key from IndexedDB
     await keyDB.deleteKey(hash);
