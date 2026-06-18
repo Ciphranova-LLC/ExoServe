@@ -243,30 +243,36 @@ async function keyhandler_check() {
             window.location.href = '/login';
     }
 
-    // Attempt to get the root node
-    res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&raw=true`, {
-        method: 'GET',
-    });
+    // Acquire a lock early since there is a lot to check
+    await treeLock.acquire([]);
+    try {
+        // Attempt to get the root node
+        res = await fetch(`/node?uuid=${uuid}&auth=${authToken}&raw=true`, {
+            method: 'GET',
+        });
 
-    // Get the root key
-    const keyObj = await e2ee_parseKey(KeyType.ROOT);
+        // Get the root key
+        const keyObj = await e2ee_parseKey(KeyType.ROOT);
 
-    // If the root node does not exist, create one
-    if (res.status == 204) {
-        rootHash = (await e2ee_newFolder(keyObj))['hash'];
-    } else if (res.status == 200) {
-        rootHash = (await res.json())['root'];
-    } else if (res.status === 440) {
-        sessionStorage.removeItem('uuid');
-        sessionStorage.removeItem('auth_token');
-        if (window.location.pathname != '/login' && window.location.pathname != '/signup')
-            window.location.href = '/login?source=expire';
-    } else {
-        return false;
+        // If the root node does not exist, create one
+        if (res.status == 204) {
+            rootHash = (await e2ee_newFolder(keyObj, 'Home', [], true))['hash'];
+        } else if (res.status == 200) {
+            rootHash = (await res.json())['root'];
+        } else if (res.status === 440) {
+            sessionStorage.removeItem('uuid');
+            sessionStorage.removeItem('auth_token');
+            if (window.location.pathname != '/login' && window.location.pathname != '/signup')
+                window.location.href = '/login?source=expire';
+        } else {
+            return false;
+        }
+
+        // Populate the UI with the root data
+        filetable_goToFolder(rootHash, keyObj, 'Home', true, true);
+    } finally {
+        await treeLock.release();
     }
-
-    // Populate the UI with the root data
-    filetable_goToFolder(rootHash, keyObj, 'Home');
     return true;
 }
 

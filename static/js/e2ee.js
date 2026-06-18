@@ -221,35 +221,24 @@ async function __e2ee_ensureFolderExists(folderName, crumbs) {
     }
 }
 
-// Helper function to conditionally reload the table view
-async function __e2ee_refreshTableView(crumbs) {
+// Helper function to unconditionally reload the table view
+async function __e2ee_refreshTableView() {
+    const crumbs = breadcrumb_elem.children;
     await treeLock.acquire(crumbs);
 
     try {
         const activeCrumb = crumbs[crumbs.length - 1];
-        const finalHash = activeCrumb.getAttribute('data-hash');
-        const finalKey = activeCrumb.getAttribute('data-key');
-        const finalName = activeCrumb.innerText;
-
-        const isDirectLast = activeCrumb.nextElementSibling === null;
-        const isParentLast =
-            !activeCrumb.parentElement || activeCrumb.parentElement.nextElementSibling === null;
-        const isActiveFolder =
-            activeCrumb instanceof Element &&
-            document.body.contains(activeCrumb) &&
-            isDirectLast &&
-            isParentLast;
-
-        if (isActiveFolder) {
-            const keyObj = await e2ee_parseKey(KeyType.B64, finalKey);
-            await filetable_goToFolder(
-                finalHash,
-                keyObj,
-                finalName,
-                (updateBreadCrumbs = false),
-                (hasLock = true)
-            );
-        }
+        const activeHash = activeCrumb.getAttribute('data-hash');
+        const activeKey = activeCrumb.getAttribute('data-key');
+        const activeName = activeCrumb.innerText;
+        const keyObj = await e2ee_parseKey(KeyType.B64, activeKey);
+        await filetable_goToFolder(
+            activeHash,
+            keyObj,
+            activeName,
+            (updateBreadCrumbs = false),
+            (hasLock = true)
+        );
     } finally {
         await treeLock.release();
     }
@@ -435,7 +424,7 @@ async function e2ee_uploadFile(crumbs) {
 
         try {
             await __e2ee_uploadFile(file, crumbs);
-            await __e2ee_refreshTableView(crumbs);
+            await __e2ee_refreshTableView();
         } catch (e) {
             console.error(e);
             return;
@@ -514,7 +503,7 @@ async function e2ee_uploadFolder(crumbs) {
         }
 
         // If the user hasn't navigated away, refresh the table
-        await __e2ee_refreshTableView(crumbs);
+        await __e2ee_refreshTableView();
 
         // Finalize the master progress toast
         folderProgressToast.finish('Folder upload successful!');
@@ -648,7 +637,7 @@ async function e2ee_newFolder(
             newParentHash = await e2ee_walkMerkleTree(crumbs, folderName, childMetadata, hasLock);
 
             if (!hasLock) {
-                await __e2ee_refreshTableView(crumbs);
+                await __e2ee_refreshTableView();
             }
         }
     } finally {

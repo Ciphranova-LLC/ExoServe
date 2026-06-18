@@ -404,6 +404,28 @@ function ui_triggerFolderUpload() {
 
 /******************************/
 
+function ui_showLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    const fileTable = document.querySelector('.file-table');
+    const breadcrumbs = document.querySelector('.breadcrumbs');
+
+    if (overlay) overlay.classList.add('active');
+    if (fileTable) fileTable.classList.add('loading-disabled');
+    if (breadcrumbs) breadcrumbs.classList.add('loading-disabled');
+}
+
+function ui_hideLoading() {
+    const overlay = document.getElementById('loading-overlay');
+    const fileTable = document.querySelector('.file-table');
+    const breadcrumbs = document.querySelector('.breadcrumbs');
+
+    if (overlay) overlay.classList.remove('active');
+    if (fileTable) fileTable.classList.remove('loading-disabled');
+    if (breadcrumbs) breadcrumbs.classList.remove('loading-disabled');
+}
+
+/******************************/
+
 document.addEventListener('click', (event) => {
     const activeDropdowns = document.querySelectorAll('.dropdown-container.active');
     activeDropdowns.forEach((container) => {

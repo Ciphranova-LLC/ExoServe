@@ -15,6 +15,7 @@
         <link href="{{ url_for('static', filename='css/modal.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/sidebar.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/toast.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/loading.css') }}" rel="stylesheet" />
 
         <script src="{{ url_for('static', filename='js/breadcrumbs.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/carousel.js') }}" defer></script>
@@ -89,6 +90,11 @@
                 <!-- File table -->
                 <div class="area-files">
                     <div class="file-table">
+                        <!-- Loading overlay -->
+                        <div id="loading-overlay" class="loading-overlay active">
+                            <div class="loading-spinner"></div>
+                            <div class="loading-text">Loading...</div>
+                        </div>
                         <table class="table sortable-table">
                             <thead>
                                 <tr>
