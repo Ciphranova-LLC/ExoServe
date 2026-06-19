@@ -35,7 +35,15 @@
     align-items: center;
 }
 
+.modal-title {
+    display: flex;
+    justify-content: center;
+    align-content: center;
+    align-items: center;
+}
+
 .modal-body {
+    position: relative;
     flex: 1;
     min-height: 0;
     min-width: 0;
@@ -103,12 +111,8 @@
 
 /* Dimensional modals */
 .modal-xl {
-    width: 90vw;
-    max-height: 90vh;
-
-    &:has(iframe) {
-        height: 90vh;
-    }
+    width: 80vw;
+    height: 80vh;
 
     h2,
     h3 {

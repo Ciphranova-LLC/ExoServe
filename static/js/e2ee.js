@@ -439,7 +439,7 @@ async function e2ee_uploadFile(crumbs) {
         if (!file) return;
 
         try {
-            const virtualCrumbs = e2ee_createVirtualCrumbs(crumbs);
+            const virtualCrumbs = __e2ee_createVirtualCrumbs(crumbs);
             await __e2ee_uploadFile(file, virtualCrumbs);
             await __e2ee_refreshTableView();
         } catch (e) {
@@ -664,6 +664,16 @@ async function e2ee_newFolder(
 
 // Download, decrypt, and preview a file
 async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
+    // Render the preview modal with the loading spinner
+    const previewDiv = document.getElementById('file-preview');
+    previewDiv.innerHTML = `
+        <div id="preview-loader" class="loading-overlay active" style="position: absolute; background: var(--bg-dark); border-radius: 10px;">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Decrypting Stream...</div>
+        </div>
+    `;
+    document.getElementById('modal-preview').showModal();
+
     // Get the Session Storage items
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
@@ -672,7 +682,7 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
     await e2ee_armWorker(decryptKey, hash, authToken);
 
     // Initialize the nested HTML
-    let html = `<h2>${filename}</h2>`;
+    let html = `<h2 class="modal-title">${escapeHtml(filename)}</h2>`;
 
     try {
         // Get the file extension
@@ -685,28 +695,29 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
                     <source src="${videoUrl}" type="video/${ext}"></video>`;
         }
 
-        // Whole-file from service worker for everything else
+        // Streaming from service worker proxy for images
+        else if (IMAGE_EXTENSIONS.includes(ext)) {
+            const imageUrl = `/node/${uuid}/${hash}?ext=${ext}`;
+            html += `<img id="preview-content" src="${imageUrl}" onclick="carousel_goFullScreen(this)" style="cursor: pointer">`;
+        }
+
+        // Whole-file from service worker for everything else (Text, PDF, SVG)
         else {
             // Download
             const res = await network_nodeGet(uuid, authToken, hash);
-            if (!res.ok) {
-                const errorBody = await res.text();
-                throw new Error(errorBody || `HTTP Error ${res.status}: Download failed`);
-            }
+            if (!res.ok) throw new Error((await res.text()) || `HTTP Error ${res.status}`);
 
             // Initialize a buffer for the decrypted data
             const decryptedBuffer = await res.arrayBuffer();
 
             // Select the MIME type
-            let mimeType = '';
+            let mimeType = 'application/octet-stream';
             if (ext === 'pdf') mimeType = 'application/pdf';
-            else if (IMAGE_EXTENSIONS.includes(ext)) mimeType = `image/${ext}`;
-            else mimeType = 'application/octet-stream';
+            else if (ext === 'svg') mimeType = 'image/svg+xml';
 
             // Reset the data blob
             URL.revokeObjectURL(currBlobUrl);
-            const blob = new Blob([decryptedBuffer], { type: mimeType });
-            currBlobUrl = URL.createObjectURL(blob);
+            currBlobUrl = URL.createObjectURL(new Blob([decryptedBuffer], { type: mimeType }));
 
             // Display based on MIME type
             if (mimeType == 'application/octet-stream') {
@@ -714,11 +725,11 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
                 const nonPrintable = text.match(/[^\x09\x0A\x0D\x20-\x7E]/g);
                 const threshold = 0.1;
                 if (nonPrintable && nonPrintable.length / text.length > threshold)
-                    html += `<div class="text-danger">Cannot preview (${filename})`;
+                    html += `<div class="text-danger">Cannot preview (${escapeHtml(filename)})</div>`;
                 else html += `<pre style="white-space: pre-wrap;">${escapeHtml(text)}</pre>`;
             } else if (mimeType == 'application/pdf') {
                 html += `<iframe src="${currBlobUrl}"></iframe>`;
-            } else {
+            } else if (mimeType == 'image/svg+xml') {
                 html += `<img id="preview-content" src="${currBlobUrl}" onclick="carousel_goFullScreen(this)" style="cursor: pointer">`;
             }
         }
@@ -728,9 +739,42 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
         html += String(e);
     }
 
-    // Display the preview
-    document.getElementById('file-preview').innerHTML = html;
-    document.getElementById('modal-preview').showModal();
+    // Append the newly generated media behind the loader
+    previewDiv.insertAdjacentHTML('beforeend', html);
+
+    // Clean up loader when the first chunk has painted
+    const loader = document.getElementById('preview-loader');
+    const media = document.getElementById('preview-content');
+
+    if (media) {
+        // Rapidly poll to detect when the browser paints the first dimensions
+        const check = setInterval(() => {
+            if (
+                (media.naturalWidth && media.naturalWidth > 0) ||
+                (media.videoWidth && media.videoWidth > 0)
+            ) {
+                loader.style.display = 'none';
+                clearInterval(check);
+            }
+        }, 50);
+
+        // Fallbacks in case polling misses or an error occurs
+        media.addEventListener('load', () => {
+            loader.style.display = 'none';
+            clearInterval(check);
+        });
+        media.addEventListener('loadeddata', () => {
+            loader.style.display = 'none';
+            clearInterval(check);
+        });
+        media.addEventListener('error', () => {
+            loader.innerHTML =
+                '<div class="text-danger" style="margin-top: 20px;">Stream Failed</div>';
+            clearInterval(check);
+        });
+    } else {
+        loader.style.display = 'none';
+    }
 }
 
 // Update references affected by a new child
