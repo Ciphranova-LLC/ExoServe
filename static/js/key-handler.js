@@ -220,7 +220,16 @@ async function keyhandler_check() {
 
     // Create a root node if one does not exist (pre-lock for new accounts)
     const res = await network_nodeGet(uuid, authToken, 'root', true);
-    if (res.status == 204) await e2ee_newFolder(keyObj, 'Home', [], true);
+    if (res.status === 204) {
+        await e2ee_newFolder(keyObj, 'Home', [], true);
+    } else if (res.status === 440) {
+        sessionStorage.removeItem('uuid');
+        sessionStorage.removeItem('auth_token');
+        if (window.location.pathname != '/login' && window.location.pathname != '/signup')
+            window.location.href = '/login?source=expire';
+    } else if (res.status !== 200) {
+        return false;
+    }
 
     // Now a lock is acquired to ensure a valid root node is loaded
     await treeLock.acquire([]);
