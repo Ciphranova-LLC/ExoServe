@@ -317,30 +317,18 @@ async function e2ee_downloadFile(hash, keyObj, filename) {
     await e2ee_armWorker(keyObj, hash, authToken);
 
     try {
-        // Download
-        const res = await network_nodeGet(uuid, authToken, hash);
-        if (!res.ok) {
-            throw new Error(`Download failed: ${res.status} ${res.statusText}`);
-        }
-
-        // Convert the response to a Blob
-        const blob = await res.blob();
-
-        // Create a temporary URL for the Blob to trigger the download
-        const objectUrl = URL.createObjectURL(blob);
-
         // Create an element to trigger the download manager
+        const path = `/node/${encodeURIComponent(uuid)}/${encodeURIComponent(hash)}`;
+        const query = `?filename=${encodeURIComponent(filename)}`;
+        const downloadUrl = path + query;
         const a = document.createElement('a');
-        a.href = objectUrl;
+        a.href = downloadUrl;
         a.download = filename;
 
-        // Click
+        // Click and cleanup
         document.body.appendChild(a);
         a.click();
-
-        // Cleanup
-        document.body.removeChild(a);
-        URL.revokeObjectURL(objectUrl);
+        setTimeout(() => document.body.removeChild(a), 100);
     } catch (error) {
         console.error('Download error:', error);
         throw error;
