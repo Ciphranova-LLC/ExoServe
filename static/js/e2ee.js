@@ -306,21 +306,45 @@ async function e2ee_parseKey(keyType, data = null) {
 
 // Download a file to the client system
 async function e2ee_downloadFile(hash, keyObj, filename) {
-    await e2ee_armWorker(keyObj, hash);
-
     // Get session info
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
+    if (!uuid || !authToken) {
+        throw new Error('Missing authentication credentials');
+    }
 
-    // Create an element to trigger the download manager
-    const a = document.createElement('a');
-    a.href = `/node?uuid=${uuid}&auth=${authToken}&hash=${hash}&download=true&filename=${encodeURIComponent(filename)}`;
-    a.download = filename;
+    // Arm the service worker
+    await e2ee_armWorker(keyObj, hash, authToken);
 
-    // Click and cleanup
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    try {
+        // Download
+        const res = await network_nodeGet(uuid, authToken, hash);
+        if (!res.ok) {
+            throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+        }
+
+        // Convert the response to a Blob
+        const blob = await res.blob();
+
+        // Create a temporary URL for the Blob to trigger the download
+        const objectUrl = URL.createObjectURL(blob);
+
+        // Create an element to trigger the download manager
+        const a = document.createElement('a');
+        a.href = objectUrl;
+        a.download = filename;
+
+        // Click
+        document.body.appendChild(a);
+        a.click();
+
+        // Cleanup
+        document.body.removeChild(a);
+        URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+        console.error('Download error:', error);
+        throw error;
+    }
 }
 
 // Encrypt and upload a file in 5MB chunks
