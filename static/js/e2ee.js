@@ -578,7 +578,7 @@ async function e2ee_encryptWhole(data, keyObj) {
 }
 
 // Fetch a folder from the server
-async function e2ee_fetchFolder(id, keyObj, data = null) {
+async function e2ee_fetchFolder(id, keyObj) {
     // Get the Session Storage items
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');

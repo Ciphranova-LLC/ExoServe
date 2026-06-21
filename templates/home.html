@@ -23,6 +23,7 @@
         <script src="{{ url_for('static', filename='js/e2ee.js') }}"></script>
         <script src="{{ url_for('static', filename='js/filetable.js') }}"></script>
         <script src="{{ url_for('static', filename='js/key-handler.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/search.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/ui.js') }}" defer></script>
     </head>
 
@@ -50,8 +51,8 @@
             <main class="layout-session">
                 <!-- Search bar -->
                 <div class="area-search">
-                    <input type="text" placeholder="Search..." />
-                    <pre id="key-name">No key set</pre>
+                    <input id="searchbar" type="text" placeholder="Search..." />
+                    <pre id="key-name"></pre>
                 </div>
 
                 <!-- Interaction buttons -->

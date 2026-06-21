@@ -187,6 +187,9 @@ function ui_submitRenameNodeModal() {
                 if (newName in parentFolder.children) {
                     throw new Error('Name collision.');
                 }
+                if (newName.includes('/')) {
+                    throw new Error('Invalid name.');
+                }
 
                 // Extract the metadata
                 const itemMetadata = parentFolder.children[oldName];
@@ -203,6 +206,8 @@ function ui_submitRenameNodeModal() {
                 console.error('Failed to rename node:', err);
                 if (err.message === 'Name collision.') {
                     alert('A file or folder with that name already exists');
+                } else if (err.message === 'Invalid name.') {
+                    alert('Invalid name');
                 } else {
                     ui_showToast(`Failed to rename ${oldName}`);
                 }

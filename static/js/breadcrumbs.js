@@ -1,7 +1,6 @@
 let breadcrumb_elem = document.getElementById('breadcrumb-list');
 
-async function breadcrumbs_append(folderHash, keyObj, folderName) {
-    // Get the base64 key if not using the root key
+async function __breadcrumbs_createCrumbElement(folderHash, keyObj, folderName) {
     let folderKey = null;
     try {
         const keyRaw = await crypto.subtle.exportKey('raw', keyObj);
@@ -10,46 +9,72 @@ async function breadcrumbs_append(folderHash, keyObj, folderName) {
         // Tried to export the root key... just keep null
     }
 
-    // Create a new head
     const head = document.createElement('li');
     const span = document.createElement('span');
     const text = document.createTextNode(folderName);
+
     head.setAttribute('class', 'crumb');
     head.setAttribute('data-hash', folderHash);
     head.setAttribute('data-key', folderKey);
     head.setAttribute('data-name', folderName);
+
     head.appendChild(span);
     span.appendChild(text);
+    return head;
+}
+
+async function __breadcrumbs_setCrumbHandler(crumb) {
+    crumb.onclick = async function () {
+        const targetHash = this.getAttribute('data-hash');
+        const targetKey = this.getAttribute('data-key');
+        const targetName = this.getAttribute('data-name');
+        const keyObj = await e2ee_parseKey(KeyType.B64, targetKey);
+        await filetable_goToFolder(targetHash, keyObj, targetName, false);
+        breadcrumbs_clear(this);
+    };
+}
+
+async function breadcrumbs_append(folderHash, keyObj, folderName) {
+    const head = await __breadcrumbs_createCrumbElement(folderHash, keyObj, folderName);
     breadcrumb_elem.appendChild(head);
 
     // When the stale head is clicked, remove later breadcrumbs from the DOM
     // Then go to that folder, but do not update the breadcrumbs
     const staleHead = document.querySelector('.crumb:nth-last-child(2)');
     if (staleHead) {
-        staleHead.onclick = async function () {
-            const targetHash = this.getAttribute('data-hash');
-            const targetKey = this.getAttribute('data-key');
-            const targetName = this.getAttribute('data-name');
-            const keyObj = await e2ee_parseKey(KeyType.B64, targetKey);
-            await filetable_goToFolder(targetHash, keyObj, targetName, (updateBreadcrumbs = false));
-            let nextNode = this.nextElementSibling;
-            while (nextNode) {
-                let nodeToRemove = nextNode;
-                nextNode = nextNode.nextElementSibling;
-                nodeToRemove.remove();
-            }
-        };
+        __breadcrumbs_setCrumbHandler(staleHead);
     }
 }
 
-function breadcrumbs_clear() {
-    const head = document.querySelector('.crumb:first-child');
-    if (head) {
-        let currNode = head;
-        while (currNode) {
-            let nextNode = currNode.nextElementSibling;
-            currNode.remove();
-            currNode = nextNode;
+async function breadcrumbs_applyPath(breadcrumbList) {
+    // Remove any existing crumbs that are after a divergence point
+    let staleHead = null;
+    if (breadcrumb_elem.children.length > 0) {
+        staleHead = breadcrumb_elem.children[breadcrumb_elem.children.length - 1];
+    }
+    breadcrumbs_clear(staleHead);
+
+    // Append new breadcrumbs
+    for (const item of breadcrumbList) {
+        const head = await __breadcrumbs_createCrumbElement(item.hash, item.keyObj, item.name);
+        breadcrumb_elem.appendChild(head);
+    }
+
+    // Set navigation handlers on all parent crumbs
+    const allCrumbChildren = breadcrumb_elem.children;
+    for (let i = 0; i < allCrumbChildren.length - 1; i++) {
+        await __breadcrumbs_setCrumbHandler(allCrumbChildren[i]);
+    }
+}
+
+function breadcrumbs_clear(cutoff = undefined) {
+    if (!cutoff) cutoff = document.querySelector('.crumb:first-child');
+    if (cutoff) {
+        let nextNode = cutoff.nextElementSibling;
+        while (nextNode) {
+            let nodeToRemove = nextNode;
+            nextNode = nextNode.nextElementSibling;
+            nodeToRemove.remove();
         }
     }
 }

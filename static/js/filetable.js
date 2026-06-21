@@ -58,16 +58,16 @@ function filtable_applyFormatting() {
     });
 }
 
-function filetable_build(folderJson) {
+function filetable_build(childList) {
     // Master data
     const tbody = document.getElementById('file-table-body');
-    const children = folderJson.children || {};
+    const filetable_currChildren = childList || {};
 
     // Buffers to hold HTML strings
     let foldersHtml = '';
     let filesHtml = '';
 
-    for (const [name, data] of Object.entries(children)) {
+    for (const [name, data] of Object.entries(filetable_currChildren)) {
         // Fallback default values
         const dateAdded = data.added || 0;
         const size = data.size || 0;
@@ -114,6 +114,11 @@ function filetable_build(folderJson) {
 
     // Reapply the previous sorting
     filetable_executeSort(filetable_currSortHdr, filetable_currSortAsc);
+}
+
+function filetable_clear() {
+    const tbody = document.getElementById('file-table-body');
+    tbody.innerHTML = '';
 }
 
 function filetable_executeSort(th, asc) {
@@ -172,7 +177,140 @@ function filetable_applyRowCheckboxesListeners() {
     });
 }
 
+async function filetable_goToFolderStandard(hash, keyObj, name, currentHereHash, crumbTargetI) {
+    // Get the crumb and hash again, as they might have changed after acquiring a lock
+    const currentCrumbs_2 = breadcrumb_elem.children;
+    const hereCrumb_2 = currentCrumbs_2[currentCrumbs_2.length - 1];
+    const hereHash_2 =
+        hereCrumb_2 === undefined ? undefined : hereCrumb_2.getAttribute('data-hash');
+
+    // Always swap parameters via breadcrumb navigating backwards
+    // parent hashes can change even if the current active child hash did not
+    if (crumbTargetI >= 0) {
+        const targetMeta = breadcrumb_elem.children[crumbTargetI];
+        hash = targetMeta.getAttribute('data-hash');
+        keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.getAttribute('data-key'));
+    }
+
+    // If navigating to a child, only swap if the current folder's hash changed
+    else if (currentHereHash !== hereHash_2) {
+        const hereKey = hereCrumb_2.getAttribute('data-key');
+        const hereKeyObj = await e2ee_parseKey(KeyType.B64, hereKey);
+        const hereFolderJson = await e2ee_fetchFolder(hereHash_2, hereKeyObj);
+
+        const targetMeta = hereFolderJson.children[name];
+        if (targetMeta) {
+            hash = targetMeta.hash;
+            keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.key);
+        } else {
+            throw new Error(`Target folder "${name}" no longer exists.`);
+        }
+    }
+
+    return {
+        finalHash: hash,
+        finalKeyObj: keyObj,
+        finalName: name,
+        breadcrumbsToAdd: [],
+    };
+}
+
+async function filetable_goToFolderSearch(hash, keyObj, name, currentHereHash) {
+    // The table file will no longer represent a search
+    search_inSearch = false;
+    search_blank = false;
+
+    // Parse the search path
+    const pathSegments = name.replace(/^\//, '').split('/');
+
+    // Take a snapshot of the current breadcrumb stack
+    const currentCrumbs = Array.from(breadcrumb_elem.children);
+
+    // Find the divergence point where the search path matches the breadcrumb history
+    let divergenceIndex = 0;
+    for (let i = 0; i < currentCrumbs.length; i++) {
+        if (i < pathSegments.length) {
+            const crumbName = currentCrumbs[i].getAttribute('data-name');
+            if (crumbName === pathSegments[i]) {
+                divergenceIndex = i + 1;
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    // Start traversal from the last known valid crumb
+    let currentHash = currentCrumbs[divergenceIndex - 1]?.getAttribute('data-hash');
+    let currentKey = currentCrumbs[divergenceIndex - 1]?.getAttribute('data-key');
+
+    // If at root and no crumbs exist, use parameter hash/key
+    if (!currentHash && currentCrumbs.length === 0) {
+        currentHash = hash;
+        currentKey = keyObj;
+    }
+
+    // Re-parse current key if needed
+    if (typeof currentKey === 'string') {
+        currentKey = await e2ee_parseKey(KeyType.B64, currentKey);
+    }
+
+    const breadcrumbsToAdd = [];
+
+    // Traverse path segments from divergence point to end
+    for (let i = divergenceIndex; i < pathSegments.length; i++) {
+        const segmentName = pathSegments[i];
+
+        // Fetch current folder to find the child
+        const folderData = await e2ee_fetchFolder(currentHash, currentKey);
+        const childMeta = folderData.children[segmentName];
+        if (!childMeta) {
+            throw new Error(
+                `Target folder "${segmentName}" no longer exists during search navigation.`
+            );
+        }
+
+        // Resolve the child's key
+        const childKeyObj = await e2ee_parseKey(KeyType.B64, childMeta.key);
+
+        // Prepare breadcrumb data
+        breadcrumbsToAdd.push({
+            name: segmentName,
+            hash: childMeta.hash,
+            keyObj: childKeyObj,
+        });
+
+        // Update current context for next iteration
+        currentHash = childMeta.hash;
+        currentKey = childKeyObj;
+    }
+
+    return {
+        finalHash: currentHash,
+        finalKeyObj: currentKey,
+        finalName: pathSegments[pathSegments.length - 1],
+        breadcrumbsToAdd: breadcrumbsToAdd,
+    };
+}
+
 async function filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs = true, hasLock = false) {
+    // Helper function to decide if navigating normally or from a search
+    async function resolveNavigationTarget(hash, keyObj, name, currentHereHash, crumbTargetI) {
+        const isSearchNavigation = name.includes('/');
+        if (isSearchNavigation) {
+            return await filetable_goToFolderSearch(hash, keyObj, name, currentHereHash);
+        } else {
+            return await filetable_goToFolderStandard(
+                hash,
+                keyObj,
+                name,
+                currentHereHash,
+                crumbTargetI
+            );
+        }
+    }
+
     // Show loading indicator
     ui_showLoading();
 
@@ -192,39 +330,22 @@ async function filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs = true
         if (!hasLock) await treeLock.acquire(currentCrumbs_1);
 
         try {
-            // Get the crumb and hash again, as they might have changed after acquiring a lock
-            const currentCrumbs_2 = breadcrumb_elem.children;
-            const hereCrumb_2 = currentCrumbs_2[currentCrumbs_2.length - 1];
-            const hereHash_2 =
-                hereCrumb_2 === undefined ? undefined : hereCrumb_2.getAttribute('data-hash');
-
-            // Always swap parameters via breadcrumb navigating backwards
-            // parent hashes can change even if the current active child hash did not
-            if (crumbTargetI >= 0) {
-                const targetMeta = breadcrumb_elem.children[crumbTargetI];
-                hash = targetMeta.getAttribute('data-hash');
-                keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.getAttribute('data-key'));
-            }
-
-            // If navigating to a child, only swap if the current folder's hash changed
-            else if (hereHash_1 !== hereHash_2) {
-                const hereKey = hereCrumb_2.getAttribute('data-key');
-                const hereKeyObj = await e2ee_parseKey(KeyType.B64, hereKey);
-                const hereFolderJson = await e2ee_fetchFolder(hereHash_2, hereKeyObj);
-
-                const targetMeta = hereFolderJson.children[name];
-                if (targetMeta) {
-                    hash = targetMeta.hash;
-                    keyObj = await e2ee_parseKey(KeyType.B64, targetMeta.key);
-                } else {
-                    throw new Error(`Target folder "${name}" no longer exists.`);
-                }
-            }
+            // Resolve the navigation target
+            const { finalHash, finalKeyObj, finalName, breadcrumbsToAdd } =
+                await resolveNavigationTarget(hash, keyObj, name, hereHash_1, crumbTargetI);
 
             // Fetch the folder and build the table
-            const targetFolderJson = await e2ee_fetchFolder(hash, keyObj);
-            filetable_build(targetFolderJson);
-            if (updateBreadcrumbs) breadcrumbs_append(hash, keyObj, name);
+            const targetFolderJson = await e2ee_fetchFolder(finalHash, finalKeyObj);
+            filetable_build(targetFolderJson.children);
+
+            // Update Breadcrumbs
+            if (updateBreadcrumbs) {
+                if (breadcrumbsToAdd && breadcrumbsToAdd.length > 0) {
+                    breadcrumbs_applyPath(breadcrumbsToAdd);
+                } else {
+                    breadcrumbs_append(finalHash, finalKeyObj, finalName);
+                }
+            }
         } finally {
             if (!hasLock) await treeLock.release();
         }
