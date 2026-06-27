@@ -1,6 +1,7 @@
 # ExoServe
 
-<p align="center"> <img src="doc/img/exoserve_logo.png"/> </p>
+<!-- <p align="center"> <img src="doc/img/exoserve_logo.png"/> </p> -->
+<p align="center"> <img src="static/img/hero.svg"/> </p>
 
 **ExoServe** is a self-hosted, **end-to-end encrypted** (E2EE) file storage solution. Designed specifically to be hosted on local hardware, it prioritizes privacy by utilizing **client-side encryption** of file contents, names, and directory topology. All cryptographic operations are handled exclusively on the client using a vanilla Javascript WebUI, ensuring the server never has access to unencrypted data or plaintext filenames.
 
@@ -66,7 +67,7 @@ This architecture allows for scrubbing and streaming of encrypted media without 
 
 ### Concurrent Session Support
 
-The system handles race conditions automatically using atomic Compare-and-Swap (CAS) logic, protected by transient locks. **Uploads are staged in parallel**, while tree mutations are serialized to ensure integrity. This allows multiple sessions to interact with the server safely without data loss.
+The system handles race conditions automatically using atomic compare-and-swap logic, protected by transient locks. Uploads are **staged in parallel**, while tree mutations are **serialized** to ensure integrity. This allows multiple sessions to interact with the server safely without data loss.
 
 ## Authentication & Secrets
 

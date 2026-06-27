@@ -20,6 +20,7 @@
     justify-content: center;
     align-items: center;
     flex: 1;
+    padding-top: 10vh;
 }
 
 /* Login box container */
@@ -37,17 +38,19 @@
 
 /* Hero Logo */
 .hero-logo {
-    background-color: var(--bg-light);
     position: absolute;
+    padding-top: 4px;
     padding-left: 16px;
     z-index: 100;
     width: calc(100% - 16px);
 }
 
 .hero-logo img {
-    height: 78px;
+    height: 62px;
     width: auto;
     display: block;
+    margin-top: 10px;
+    margin-bottom: 10px;
 }
 
 /* Favicon logo */
