@@ -54,11 +54,23 @@ self.addEventListener('fetch', (event) => {
 
     // The File Routes
     if (url.pathname.includes('/node') && event.request.method === 'GET') {
-        // Bypass the Service Worker if the UI requests raw encrypted bytes
-        if (url.searchParams.get('raw') === 'true') {
-            return;
+        url.searchParams.delete('raw');
+        const modifiedRequest = new Request(url.toString(), {
+            method: event.request.method,
+            headers: event.request.headers,
+            credentials: event.request.credentials,
+            mode: event.request.mode,
+            redirect: event.request.redirect,
+            referrer: event.request.referrer,
+            referrerPolicy: event.request.referrerPolicy,
+            body: event.request.body,
+        });
+        if (event.request.url.includes('raw=true')) {
+            event.respondWith(fetch(modifiedRequest));
+        } else {
+            event.respondWith(handleDecryption(modifiedRequest, event.clientId));
         }
-        event.respondWith(handleDecryption(event.request, event.clientId));
+        return;
     }
 });
 
