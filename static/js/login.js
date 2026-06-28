@@ -16,7 +16,7 @@ if (urlParams.get('source') == 'signup') {
         "<span style='color:#57E0AA;'>User registeration successful. You may now login</span>";
 } else if (urlParams.get('source') == 'expire') {
     statusElem.style.visibility = 'visible';
-    statusElem.innerHTML = "<span style='color:#E0578D;'>Session expired</span>";
+    statusElem.innerHTML = "<span style='color:#D7286E;'>Session expired</span>";
 }
 
 async function login_register() {
@@ -29,27 +29,31 @@ async function login_register() {
     // Validate that the two password fields are equal
     if (password != confirm) {
         statusElem.style.visibility = 'visible';
-        statusElem.innerHTML = "<span style='color:#E0578D;'>Passwords are not equal</span>";
+        statusElem.innerHTML = "<span style='color:#D7286E;'>Passwords are not equal</span>";
         return;
     }
 
     // Validate that a password was used
     if (password.length == 0) {
         statusElem.style.visibility = 'visible';
-        statusElem.innerHTML = "<span style='color:#E0578D;'>Password cannot be empty</span>";
+        statusElem.innerHTML = "<span style='color:#D7286E;'>Password cannot be empty</span>";
         return;
     }
+
+    // Indicate network job
+    statusElem.style.visibility = 'visible';
+    statusElem.innerHTML = "<span style='color:#D6E9FB;'>Contacting server...</span>";
 
     // Attempt to register with the server
     let res = await keyhandler_register(username, password, salt);
     if (res.status == 400) {
         statusElem.style.visibility = 'visible';
         statusElem.innerHTML =
-            "<span style='color:#E0578D;'>Server rejected user registration</span>";
+            "<span style='color:#D7286E;'>Server rejected user registration</span>";
         return;
     } else if (res.status != 200) {
         statusElem.style.visibility = 'visible';
-        statusElem.innerHTML = "<span style='color:#E0578D;'>Unexpected server error</span>";
+        statusElem.innerHTML = "<span style='color:#D7286E;'>Unexpected server error</span>";
         return;
     }
 
@@ -73,15 +77,15 @@ async function login_login() {
     // Gather raw key material
     const username = usernameElem.value;
     const password = passwordElem.value;
+    statusElem.style.visibility = 'visible';
+    statusElem.innerHTML = "<span style='color:#D6E9FB;'>Contacting server...</span>";
 
     // Attempt to get a session token from the server
     let res = await keyhandler_login(username, password);
     if (res === null || res.status !== 200) {
-        statusElem.style.visibility = 'visible';
-        statusElem.innerHTML = "<span style='color:#E0578D;'>Server rejected user login</span>";
+        statusElem.innerHTML = "<span style='color:#D7286E;'>Server rejected user login</span>";
         return;
     }
-    statusElem.style.visibility = 'visible';
     statusElem.innerHTML = "<span style='color:#57E0AA;'>User login successful</span>";
 
     // Save the auth token and UUID to session data
