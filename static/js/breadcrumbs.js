@@ -29,7 +29,7 @@ async function __breadcrumbs_setCrumbHandler(crumb) {
         const targetKey = this.getAttribute('data-key');
         const targetName = this.getAttribute('data-name');
         const keyObj = await e2ee_parseKey(KeyType.B64, targetKey);
-        await filetable_goToFolder(targetHash, keyObj, targetName, false);
+        await filetable_table.goToFolder(targetHash, keyObj, targetName, false);
         breadcrumbs_clear(this);
     };
 }

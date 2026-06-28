@@ -1,31 +1,5 @@
-// State variables and helpers for sorting the table
-let filetable_currSortHdr = null;
-let filetable_currSortAsc = true;
-
-const filetable_getCellValue = (tr, idx) => {
-    const cell = tr.children[idx];
-    return cell.getAttribute('data-sort') || cell.innerText || cell.textContent;
-};
-const filetable_comparer = (idx, asc) => (a, b) => {
-    // Sort folders above files
-    const aIsFolder = a.classList.contains('folder-row');
-    const bIsFolder = b.classList.contains('folder-row');
-    if (aIsFolder && !bIsFolder) return -1;
-    if (!aIsFolder && bIsFolder) return 1;
-
-    // Sort within folder/file groupings
-    const v1 = filetable_getCellValue(a, idx);
-    const v2 = filetable_getCellValue(b, idx);
-    let result;
-    if (v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2)) {
-        result = v1 - v2;
-    } else {
-        result = v1.toString().localeCompare(v2);
-    }
-    return asc ? result : -result;
-};
-
-function filtable_formatBytes(bytes) {
+// Formatter functions
+function __filetable_formatBytes(bytes) {
     if (bytes === -1 || bytes === '--' || bytes == null) return '--';
     bytes = parseInt(bytes);
     if (bytes === 0) return '0 B';
@@ -36,8 +10,7 @@ function filtable_formatBytes(bytes) {
 
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
-
-function filtable_formatDate(unix_timestamp) {
+function __filetable_formatDate(unix_timestamp) {
     if (!unix_timestamp || unix_timestamp == 0) return '--';
 
     const date = new Date(parseInt(unix_timestamp));
@@ -46,137 +19,384 @@ function filtable_formatDate(unix_timestamp) {
     return `${pad(date.getMonth() + 1)}/${pad(date.getDate())}/${date.getFullYear()}, ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-function filtable_applyFormatting() {
-    document.querySelectorAll('.date-cell').forEach((cell) => {
-        const rawTimestamp = cell.getAttribute('data-sort');
-        cell.innerText = filtable_formatDate(rawTimestamp);
-    });
+// FileTable Class for managing table instances
+class FileTable {
+    constructor(config) {
+        // Configuration
+        this.tbodyId = config.tbodyId || 'file-table-body';
+        this.checkboxHeaderId = config.checkboxHeaderId || 'header-checkbox';
+        this.nameHeaderId = config.nameHeaderId || 'header-name';
+        this.columnConfig = config.columnConfig || [];
+        this.colgroupId = config.colgroupId || null;
 
-    document.querySelectorAll('.size-cell').forEach((cell) => {
-        const rawBytes = cell.getAttribute('data-sort');
-        cell.innerText = filtable_formatBytes(rawBytes);
-    });
-}
+        // State variables
+        this.currSortHdr = null;
+        this.currSortAsc = true;
+        this.currentData = null;
 
-function filetable_build(childList) {
-    // Master data
-    const tbody = document.getElementById('file-table-body');
-    const filetable_currChildren = childList || {};
+        // DOM elements
+        this.tbody = null;
+        this.checkboxHeader = null;
+        this.table = null;
 
-    // Buffers to hold HTML strings
-    let foldersHtml = '';
-    let filesHtml = '';
-
-    for (const [name, data] of Object.entries(filetable_currChildren)) {
-        // Fallback default values
-        const dateAdded = data.added || 0;
-        const size = data.size || 0;
-        const hash = data.hash || '';
-        const key = data.key || null;
-
-        // Child is a folder
-        if (data.type === 'folder') {
-            foldersHtml += `
-                <tr class="folder-row" data-name="${name}" data-hash="${hash}" data-key="${key}" onclick="filetable_goToFolderElem(this)">
-                    <td class="column-checkbox">
-                        <input class="checkbox-row" type="checkbox" onclick="event.stopPropagation()">
-                    </td>
-                    <td class="column-name type-folder"> <img src="static/img/folder.svg"/> ${name} </td>
-                    <td class="date-cell" data-sort="${dateAdded}"></td>
-                    <td>Folder</td>
-                    <td class="size-cell" data-sort="${size}"></td> 
-                </tr>
-            `;
-        }
-
-        // Child is a (presumed) file
-        else {
-            const displayType = data.type === 'file' ? 'File' : data.type || 'File';
-
-            filesHtml += `
-                <tr class="file-row" data-hash="${hash}" data-key="${key}" data-name="${name}" onclick="carousel_update(this)">
-                    <td class="column-checkbox">
-                        <input class="checkbox-row" type="checkbox" onclick="event.stopPropagation()">
-                    </td>
-                    <td class="column-name type-file"> <img src="static/img/file.svg"/> ${name} </td>
-                    <td class="date-cell" data-sort="${dateAdded}"></td>
-                    <td>${displayType}</td>
-                    <td class="size-cell" data-sort="${size}"></td>
-                </tr>
-            `;
-        }
+        // Initialize
+        this.init();
     }
 
-    // Update the HTML
-    tbody.innerHTML = foldersHtml + filesHtml;
-    filtable_applyFormatting();
-    filetable_applyRowCheckboxesListeners();
+    init() {
+        // Get DOM elements
+        this.tbody = document.getElementById(this.tbodyId);
+        this.table = this.tbody?.closest('table');
 
-    // Reapply the previous sorting
-    filetable_executeSort(filetable_currSortHdr, filetable_currSortAsc);
-}
+        if (!this.tbody) {
+            console.error(`FileTable: tbody element with id "${this.tbodyId}" not found`);
+            return;
+        }
 
-function filetable_clear() {
-    const tbody = document.getElementById('file-table-body');
-    tbody.innerHTML = '';
-}
+        // Build table structure based on column config
+        this.buildTableStructure();
 
-function filetable_executeSort(th, asc) {
-    if (!th) return;
+        // Apply table sorter listeners
+        this.applyTableSorter();
 
-    const table = th.closest('table');
-    const tbody = table.querySelector('tbody');
-    const idx = Array.from(th.parentNode.children).indexOf(th);
-
-    Array.from(tbody.querySelectorAll('tr'))
-        .sort(filetable_comparer(idx, asc))
-        .forEach((tr) => tbody.appendChild(tr));
-
-    const arrowPath = asc ? '../static/img/arrow-up.svg' : '../static/img/arrow-down.svg';
-    let sortImg = document.getElementById('sort-arrow');
-    if (!sortImg) {
-        sortImg = document.createElement('img');
-        sortImg.id = 'sort-arrow';
-    }
-    sortImg.src = arrowPath;
-    th.prepend(sortImg);
-}
-
-function filetable_applyTableSorter() {
-    document.querySelectorAll('.sortable-table th').forEach((th) => {
-        if (th.childElementCount == 0 || th.children[0].className != 'checkbox-header') {
-            th.addEventListener('click', function () {
-                if (filetable_currSortHdr === this) {
-                    filetable_currSortAsc = !filetable_currSortAsc;
-                } else {
-                    filetable_currSortHdr = this;
-                    filetable_currSortAsc = true;
-                }
-                filetable_executeSort(filetable_currSortHdr, filetable_currSortAsc);
+        // Setup checkbox header listener
+        this.checkboxHeader = document.querySelector(`#${this.checkboxHeaderId} .checkbox-header`);
+        if (this.checkboxHeader) {
+            this.checkboxHeader.addEventListener('change', (e) => {
+                const current_rows = this.tbody.querySelectorAll('.checkbox-row');
+                current_rows.forEach(
+                    (checkbox) => (checkbox.checked = this.checkboxHeader.checked)
+                );
             });
         }
-    });
-    filetable_currSortHdr = document.getElementById('header-name');
-    filetable_currSortAsc = true;
-    filetable_executeSort(filetable_currSortHdr, filetable_currSortAsc);
-}
+    }
 
-function filetable_applyRowCheckboxesListeners() {
-    const checkbox_header = document.querySelector('.checkbox-header');
-    const checkbox_rows = document.querySelectorAll('.checkbox-row');
+    // Build table header and colgroup based on column config
+    buildTableStructure() {
+        if (!this.table) return;
 
-    checkbox_rows.forEach((checkbox) => {
-        checkbox.addEventListener('change', function () {
-            if (!checkbox.checked) {
-                checkbox_header.checked = false;
+        // Build thead
+        let theadHtml = '<tr>';
+        for (let i = 0; i < this.columnConfig.length; i++) {
+            const col = this.columnConfig[i];
+            const colClass =
+                col.type === 'checkbox'
+                    ? 'column-checkbox'
+                    : 'column-cell';
+            const sortableClass = col.sortable !== false ? 'sortable' : '';
+            const thId =
+                col.type === 'checkbox'
+                    ? this.checkboxHeaderId
+                    : col.type === 'name'
+                      ? this.nameHeaderId
+                      : `header-${col.type}-${i}`;
+
+            const innerContent = col.type === 'checkbox' 
+                ? '<input class="checkbox-header" type="checkbox" />' 
+                : col.title;
+
+            theadHtml += `<th id="${thId}" class="${colClass} ${sortableClass}">${innerContent}</th>`;
+        }
+        theadHtml += '</tr>';
+
+        const thead = this.table.querySelector('thead');
+        if (thead) {
+            thead.innerHTML = theadHtml;
+        }
+
+        // Build colgroup
+        if (this.colgroupId) {
+            const colgroup = document.getElementById(this.colgroupId);
+            if (colgroup) {
+                let colgroupHtml = '';
+                for (const col of this.columnConfig) {
+                    colgroupHtml += `<col style="width: ${col.width}" />`;
+                }
+                colgroup.innerHTML = colgroupHtml;
+            }
+        }
+    }
+
+    // Helper to get cell value for sorting
+    getCellValue(tr, idx) {
+        const cell = tr.children[idx];
+        return cell.getAttribute('data-sort') || cell.innerText || cell.textContent;
+    }
+
+    // Sort comparer function
+    comparer(idx, asc) {
+        return (a, b) => {
+            // Sort folders above files
+            const aIsFolder = a.classList.contains('folder-row');
+            const bIsFolder = b.classList.contains('folder-row');
+            if (aIsFolder && !bIsFolder) return -1;
+            if (!aIsFolder && bIsFolder) return 1;
+
+            // Sort within folder/file groupings
+            const v1 = this.getCellValue(a, idx);
+            const v2 = this.getCellValue(b, idx);
+            let result;
+            if (v1 !== '' && v2 !== '' && !isNaN(v1) && !isNaN(v2)) {
+                result = v1 - v2;
             } else {
-                const allChecked = Array.from(checkbox_rows).every((cb) => cb.checked);
-                checkbox_header.checked = allChecked;
+                result = v1.toString().localeCompare(v2);
+            }
+            return asc ? result : -result;
+        };
+    }
+
+    // Execute sort on this table instance
+    executeSort(th, asc) {
+        if (!th) return;
+
+        const table = th.closest('table');
+        const tbody = table.querySelector('tbody');
+        const idx = Array.from(th.parentNode.children).indexOf(th);
+
+        Array.from(tbody.querySelectorAll('tr'))
+            .sort(this.comparer(idx, asc))
+            .forEach((tr) => tbody.appendChild(tr));
+
+        const arrowPath = asc ? '../static/img/arrow-up.svg' : '../static/img/arrow-down.svg';
+        let sortImg = document.getElementById('sort-arrow');
+        if (!sortImg) {
+            sortImg = document.createElement('img');
+            sortImg.id = 'sort-arrow';
+        }
+        sortImg.src = arrowPath;
+        th.prepend(sortImg);
+    }
+
+    // Apply table sorter listeners to this table
+    applyTableSorter() {
+        const table = this.tbody?.closest('table');
+        if (!table) return;
+
+        table.querySelectorAll('th').forEach((th) => {
+            if (th.childElementCount == 0 || th.children[0].className != 'checkbox-header') {
+                if (th.classList.contains('sortable')) {
+                    th.addEventListener('click', () => {
+                        if (this.currSortHdr === th) {
+                            this.currSortAsc = !this.currSortAsc;
+                        } else {
+                            this.currSortHdr = th;
+                            this.currSortAsc = true;
+                        }
+                        this.executeSort(this.currSortHdr, this.currSortAsc);
+                    });
+                }
             }
         });
-    });
+
+        // Set default sort (name column if exists)
+        const nameHeader = document.getElementById(this.nameHeaderId);
+        if (nameHeader) {
+            this.currSortHdr = nameHeader;
+            this.currSortAsc = true;
+            this.executeSort(this.currSortHdr, this.currSortAsc);
+        }
+    }
+
+    // Apply row checkbox listeners
+    applyRowCheckboxesListeners() {
+        const checkbox_rows = this.tbody.querySelectorAll('.checkbox-row');
+        checkbox_rows.forEach((checkbox) => {
+            checkbox.addEventListener('change', () => {
+                if (!checkbox.checked) {
+                    if (this.checkboxHeader) this.checkboxHeader.checked = false;
+                } else {
+                    const allChecked = Array.from(checkbox_rows).every((cb) => cb.checked);
+                    if (this.checkboxHeader) this.checkboxHeader.checked = allChecked;
+                }
+            });
+        });
+    }
+
+    // Format cells (date and size)
+    applyFormatting() {
+        this.tbody.querySelectorAll('.date-cell').forEach((cell) => {
+            const rawTimestamp = cell.getAttribute('data-sort');
+            cell.innerText = __filetable_formatDate(rawTimestamp);
+        });
+
+        this.tbody.querySelectorAll('.size-cell').forEach((cell) => {
+            const rawBytes = cell.getAttribute('data-sort');
+            cell.innerText = __filetable_formatBytes(rawBytes);
+        });
+    }
+
+    // Build the table with data
+    build(childList) {
+        // Store current data
+        this.currentData = childList || {};
+
+        // Buffers to hold HTML strings
+        let foldersHtml = '';
+        let filesHtml = '';
+
+        for (const [name, data] of Object.entries(this.currentData)) {
+            // Fallback default values
+            const dateAdded = data.added || 0;
+            const size = data.size || 0;
+            const hash = data.hash || '';
+            const key = data.key || null;
+
+            // Build row based on column config
+            let rowHtml = '<tr';
+            if (data.type === 'folder') {
+                rowHtml += ` class="folder-row" data-name="${name}" data-hash="${hash}" data-key="${key}" onclick="filetable_table.goToFolderElem(this)"`;
+            } else {
+                rowHtml += ` class="file-row" data-hash="${hash}" data-key="${key}" data-name="${name}" onclick="carousel_update(this)"`;
+            }
+            rowHtml += '>';
+
+            for (let i = 0; i < this.columnConfig.length; i++) {
+                const col = this.columnConfig[i];
+                let cellContent = '';
+                let cellClass = '';
+                let dataSort = '';
+
+                switch (col.type) {
+                    case 'checkbox':
+                        cellClass = 'column-checkbox';
+                        cellContent = `<input class="checkbox-row" type="checkbox" onclick="event.stopPropagation()">`;
+                        break;
+                    case 'name':
+                        cellClass = 'column-name type-folder';
+                        const imgSrc =
+                            data.type === 'folder'
+                                ? 'static/img/folder.svg'
+                                : 'static/img/file.svg';
+                        cellContent = `<img src="${imgSrc}"/> ${name}`;
+                        break;
+                    case 'date':
+                        cellClass = 'date-cell';
+                        dataSort = data[col.dataKey] || 0;
+                        cellContent = '';
+                        break;
+                    case 'size':
+                        cellClass = 'size-cell';
+                        dataSort = data[col.dataKey] || 0;
+                        cellContent = '';
+                        break;
+                    case 'type':
+                        cellClass = 'column-cell';
+                        const displayType = data.type === 'file' ? 'File' : data.type || 'File';
+                        cellContent = data.type === 'folder' ? 'Folder' : displayType;
+                        break;
+                    case 'string':
+                        cellClass = 'column-cell';
+                        cellContent = data[col.dataKey] || '';
+                        break;
+                    default:
+                        cellClass = 'column-cell';
+                        cellContent = data[col.dataKey] || '';
+                }
+
+                if (dataSort !== '') {
+                    rowHtml += `<td class="${cellClass}" data-sort="${dataSort}">${cellContent}</td>`;
+                } else {
+                    rowHtml += `<td class="${cellClass}">${cellContent}</td>`;
+                }
+            }
+
+            rowHtml += '</tr>';
+
+            if (data.type === 'folder') {
+                foldersHtml += rowHtml;
+            } else {
+                filesHtml += rowHtml;
+            }
+        }
+
+        // Update the HTML
+        this.tbody.innerHTML = foldersHtml + filesHtml;
+        this.applyFormatting();
+        this.applyRowCheckboxesListeners();
+
+        // Reapply the previous sorting
+        this.executeSort(this.currSortHdr, this.currSortAsc);
+    }
+
+    // Clear the table
+    clear() {
+        this.tbody.innerHTML = '';
+    }
+
+    // Go to folder (navigation)
+    async goToFolder(hash, keyObj, name, updateBreadcrumbs = true, hasLock = false) {
+        // Helper function to decide if navigating normally or from a search
+        async function resolveNavigationTarget(hash, keyObj, name, currentHereHash, crumbTargetI) {
+            const isSearchNavigation = name.includes('/');
+            if (isSearchNavigation) {
+                return await filetable_goToFolderSearch(hash, keyObj, name, currentHereHash);
+            } else {
+                return await filetable_goToFolderStandard(
+                    hash,
+                    keyObj,
+                    name,
+                    currentHereHash,
+                    crumbTargetI
+                );
+            }
+        }
+
+        // Show loading indicator
+        ui_showLoading();
+
+        try {
+            // Get the hash of the current folder
+            const currentCrumbs_1 = breadcrumb_elem.children;
+            const hereCrumb_1 = currentCrumbs_1[currentCrumbs_1.length - 1];
+            const hereHash_1 =
+                hereCrumb_1 === undefined ? undefined : hereCrumb_1.getAttribute('data-hash');
+
+            // Determine if navigating to a child or parent
+            const crumbTargetI = Array.from(currentCrumbs_1).findIndex(
+                (crumb) => crumb.getAttribute('data-hash') === hash
+            );
+
+            // Acquire a lock if one is not already had
+            if (!hasLock) await treeLock.acquire(currentCrumbs_1);
+
+            try {
+                // Resolve the navigation target
+                const { finalHash, finalKeyObj, finalName, breadcrumbsToAdd } =
+                    await resolveNavigationTarget(hash, keyObj, name, hereHash_1, crumbTargetI);
+
+                // Fetch the folder and build the table
+                const targetFolderJson = await e2ee_fetchFolder(finalHash, finalKeyObj);
+                this.build(targetFolderJson.children);
+
+                // Update Breadcrumbs
+                if (updateBreadcrumbs) {
+                    if (breadcrumbsToAdd && breadcrumbsToAdd.length > 0) {
+                        breadcrumbs_applyPath(breadcrumbsToAdd);
+                    } else {
+                        breadcrumbs_append(finalHash, finalKeyObj, finalName);
+                    }
+                }
+            } finally {
+                if (!hasLock) await treeLock.release();
+            }
+        } catch (error) {
+            console.error('Navigation failed:', error);
+            throw error;
+        } finally {
+            ui_hideLoading();
+        }
+    }
+
+    // Go to folder element (click handler)
+    async goToFolderElem(elem, updateBreadcrumbs = true) {
+        const hash = elem.getAttribute('data-hash');
+        const name = elem.getAttribute('data-name');
+        const keyObj = await e2ee_parseKey(KeyType.B64, elem.getAttribute('data-key'));
+        await this.goToFolder(hash, keyObj, name, updateBreadcrumbs);
+    }
 }
 
+// Navigation helper functions (globals - interact with breadcrumb system)
 async function filetable_goToFolderStandard(hash, keyObj, name, currentHereHash, crumbTargetI) {
     // Get the crumb and hash again, as they might have changed after acquiring a lock
     const currentCrumbs_2 = breadcrumb_elem.children;
@@ -294,78 +514,59 @@ async function filetable_goToFolderSearch(hash, keyObj, name, currentHereHash) {
     };
 }
 
-async function filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs = true, hasLock = false) {
-    // Helper function to decide if navigating normally or from a search
-    async function resolveNavigationTarget(hash, keyObj, name, currentHereHash, crumbTargetI) {
-        const isSearchNavigation = name.includes('/');
-        if (isSearchNavigation) {
-            return await filetable_goToFolderSearch(hash, keyObj, name, currentHereHash);
-        } else {
-            return await filetable_goToFolderStandard(
-                hash,
-                keyObj,
-                name,
-                currentHereHash,
-                crumbTargetI
-            );
-        }
-    }
-
-    // Show loading indicator
-    ui_showLoading();
-
-    try {
-        // Get the hash of the current folder
-        const currentCrumbs_1 = breadcrumb_elem.children;
-        const hereCrumb_1 = currentCrumbs_1[currentCrumbs_1.length - 1];
-        const hereHash_1 =
-            hereCrumb_1 === undefined ? undefined : hereCrumb_1.getAttribute('data-hash');
-
-        // Determine if navigating to a child or parent
-        const crumbTargetI = Array.from(currentCrumbs_1).findIndex(
-            (crumb) => crumb.getAttribute('data-hash') === hash
-        );
-
-        // Acquire a lock if one is not already had
-        if (!hasLock) await treeLock.acquire(currentCrumbs_1);
-
-        try {
-            // Resolve the navigation target
-            const { finalHash, finalKeyObj, finalName, breadcrumbsToAdd } =
-                await resolveNavigationTarget(hash, keyObj, name, hereHash_1, crumbTargetI);
-
-            // Fetch the folder and build the table
-            const targetFolderJson = await e2ee_fetchFolder(finalHash, finalKeyObj);
-            filetable_build(targetFolderJson.children);
-
-            // Update Breadcrumbs
-            if (updateBreadcrumbs) {
-                if (breadcrumbsToAdd && breadcrumbsToAdd.length > 0) {
-                    breadcrumbs_applyPath(breadcrumbsToAdd);
-                } else {
-                    breadcrumbs_append(finalHash, finalKeyObj, finalName);
-                }
-            }
-        } finally {
-            if (!hasLock) await treeLock.release();
-        }
-    } catch (error) {
-        console.error('Navigation failed:', error);
-        throw error;
-    } finally {
-        ui_hideLoading();
-    }
-}
-
-async function filetable_goToFolderElem(elem, updateBreadcrumbs = true) {
-    const hash = elem.getAttribute('data-hash');
-    const name = elem.getAttribute('data-name');
-    const keyObj = await e2ee_parseKey(KeyType.B64, elem.getAttribute('data-key'));
-    await filetable_goToFolder(hash, keyObj, name, updateBreadcrumbs);
-}
+// Global instance of the home table
+let filetable_table = null;
 
 document.addEventListener('DOMContentLoaded', () => {
-    filetable_applyTableSorter();
+    // Initialize the file table based on the path
+    if (window.location.pathname.startsWith('/home')) {
+        filetable_table = new FileTable({
+            tbodyId: 'file-table-body',
+            checkboxHeaderId: 'header-checkbox',
+            nameHeaderId: 'header-name',
+            colgroupId: 'file-colgroup',
+            columnConfig: [
+                { type: 'checkbox', title: '', width: '5%', sortable: false },
+                { type: 'name', title: 'Name', width: '55%', sortable: true },
+                {
+                    type: 'date',
+                    title: 'Date Added',
+                    width: '20%',
+                    sortable: true,
+                    dataKey: 'added',
+                },
+                { type: 'type', title: 'Type', width: '10%', sortable: true },
+                { type: 'size', title: 'Size', width: '10%', sortable: true, dataKey: 'size' },
+            ],
+        });
+    } else if (window.location.pathname.startsWith('/trash')) {
+        filetable_table = new FileTable({
+            tbodyId: 'file-table-body',
+            checkboxHeaderId: 'header-checkbox',
+            nameHeaderId: 'header-name',
+            colgroupId: 'file-colgroup',
+            columnConfig: [
+                { type: 'checkbox', title: '', width: '5%', sortable: false },
+                { type: 'name', title: 'Name', width: '35%', sortable: true },
+                {
+                    type: 'string',
+                    title: 'Original Path',
+                    width: '40%',
+                    sortable: true,
+                    dataKey: 'path',
+                },
+                {
+                    type: 'date',
+                    title: 'Date Deleted',
+                    width: '20%',
+                    sortable: true,
+                    dataKey: 'deleted',
+                },
+            ],
+        });
+    }
+
+    // Setup checkbox header listener
     const checkbox_header = document.querySelector('.checkbox-header');
     if (checkbox_header) {
         checkbox_header.addEventListener('change', function () {

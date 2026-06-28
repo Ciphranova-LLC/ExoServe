@@ -105,7 +105,7 @@ async function search_run() {
         const hits = await __search_search(here, hereFolderJson.children, term);
 
         // Build the file table
-        filetable_build(hits, true);
+        filetable_table.build(hits, true);
     } finally {
         await treeLock.release();
         ui_hideLoading();
@@ -126,7 +126,7 @@ search_barElem.addEventListener('keydown', (event) => {
 search_barElem.addEventListener('input', async (event) => {
     if (search_inSearch) {
         if (search_barElem.value.length > 0 && !search_blank) {
-            filetable_clear();
+            filetable_table.clear();
             search_blank = true;
         } else if (search_barElem.value.length === 0) {
             search_inSearch = false;
@@ -138,7 +138,7 @@ search_barElem.addEventListener('input', async (event) => {
             const hereName = hereCrumb.getAttribute('data-name');
             const hereKey = hereCrumb.getAttribute('data-key');
             const hereKeyObj = await e2ee_parseKey(KeyType.B64, hereKey);
-            await filetable_goToFolder(hereHash, hereKeyObj, hereName, false, false);
+            await filetable_table.goToFolder(hereHash, hereKeyObj, hereName, false, false);
         }
     }
 });

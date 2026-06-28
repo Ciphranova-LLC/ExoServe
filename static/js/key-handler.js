@@ -250,7 +250,7 @@ async function keyhandler_check() {
         }
 
         // Populate the UI with the root data
-        filetable_goToFolder(rootHash, keyObj, 'Home', true, true);
+        filetable_table.goToFolder(rootHash, keyObj, 'Home', true, true);
     } finally {
         await treeLock.release();
     }

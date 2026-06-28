@@ -240,7 +240,7 @@ async function __e2ee_refreshTableView() {
         const activeKey = activeCrumb.getAttribute('data-key');
         const activeName = activeCrumb.innerText;
         const keyObj = await e2ee_parseKey(KeyType.B64, activeKey);
-        await filetable_goToFolder(activeHash, keyObj, activeName, false, true);
+        await filetable_table.goToFolder(activeHash, keyObj, activeName, false, true);
     } finally {
         await treeLock.release();
     }
