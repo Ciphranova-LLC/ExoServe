@@ -6,8 +6,8 @@
 .dropdown-menu {
     position: absolute;
     top: 100%;
-    left: 0; /* Align it with the left edge of the button */
-    margin-top: 4px; /* Give it a little breathing room */
+    left: 0;
+    margin-top: 4px;
 
     background-color: var(--bg-dark);
     border: 1px solid var(--border-color-emph);
@@ -25,8 +25,8 @@
     transition: all 0.1s ease;
 
     img {
-        width: 32px;
-        margin-right: 8px;
+        width: 24px;
+        margin-right: 12px;
     }
 }
 
