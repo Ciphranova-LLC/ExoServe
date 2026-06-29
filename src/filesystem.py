@@ -35,7 +35,8 @@ class ExoDatabase:
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS roots (
                     uuid    TEXT PRIMARY KEY,
-                    root    BLOB,
+                    home    BLOB,
+                    trash   BLOB,
                     FOREIGN KEY (uuid) REFERENCES users(uuid)
                 );
             ''')
@@ -81,11 +82,11 @@ class ExoDatabase:
                 VALUES (?, ?, ?, ?, ?)
             ''', (uuid, salt, pubkey, privkey, iv))
 
-            # Create user root placeholder
+            # Create user root placeholder for both home and trash
             cursor.execute('''
-                INSERT INTO roots (uuid, root)
-                VALUES (?, ?)
-            ''', (uuid, None))
+                INSERT INTO roots (uuid, home, trash)
+                VALUES (?, NULL, NULL)
+            ''', (uuid,))
         self.conn.commit()
         return True
 
@@ -196,25 +197,44 @@ class ExoDatabase:
                 self.conn.commit()
                 return True
 
-    def get_root_hash(self, uuid):
+    def get_root_hashes(self, uuid):
         with self.get_cursor() as cursor:
             cursor.execute('''
-                SELECT root FROM roots
-                WHERE uuid = ?
+                SELECT home, trash FROM roots WHERE uuid = ?
             ''', (uuid,))
             row = cursor.fetchone()
+
         if row is None:
             return None
-        return row[0]
 
-    def upsert_root_hash(self, uuid, root):
+        return {
+            'home': row[0],
+            'trash': row[1]
+        }
+
+    def upsert_root_hash(self, uuid, root, tree_type='home'):
+        if tree_type not in ('home', 'trash'):
+            return False
         if not self._uuid_exists(uuid):
             return False
         with self.get_cursor() as cursor:
-            cursor.execute('''
-                INSERT OR REPLACE INTO roots (uuid, root)
-                VALUES (?, ?)
-            ''', (uuid, root))
+            # Get the existing other tree's root
+            other_column = 'trash' if tree_type == 'home' else 'home'
+            cursor.execute(f'SELECT {other_column} FROM roots WHERE uuid = ?', (uuid,))
+            row = cursor.fetchone()
+            other_root = row[0] if row else None
+
+            # Update with both values
+            if tree_type == 'home':
+                cursor.execute('''
+                    INSERT OR REPLACE INTO roots (uuid, home, trash)
+                    VALUES (?, ?, ?)
+                ''', (uuid, root, other_root))
+            else:
+                cursor.execute('''
+                    INSERT OR REPLACE INTO roots (uuid, home, trash)
+                    VALUES (?, ?, ?)
+                ''', (uuid, other_root, root))
         self.conn.commit()
         return True
 

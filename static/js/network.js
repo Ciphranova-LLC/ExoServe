@@ -20,8 +20,8 @@ async function network_authSubmit(uuid, nonce, signature) {
     });
 }
 
-async function network_lockAcquire(uuid, auth, key) {
-    return await fetch('/lock/acquire', {
+async function network_lockAcquire(uuid, auth, key, treeType = 'home') {
+    const res = await fetch('/lock/acquire', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -30,6 +30,11 @@ async function network_lockAcquire(uuid, auth, key) {
             key: key,
         }),
     });
+    const data = await res.json();
+    if (data.status === 'success') {
+        return data.version[treeType];
+    }
+    return null;
 }
 
 async function network_lockRelease(uuid, auth, key) {
@@ -55,9 +60,11 @@ async function network_nodeDelete(uuid, auth, hash, lockKey) {
     });
 }
 
-async function network_nodeGet(uuid, auth, hash, raw = false) {
+async function network_nodeGet(uuid, auth, hash, raw = false, treeType = 'home') {
     const path = `/node/${encodeURIComponent(uuid)}/${encodeURIComponent(hash)}`;
-    const query = `?raw=${raw}`;
+    const queryParams = [`raw=${raw}`];
+    if (treeType && hash == 'root') queryParams.push(`type=${treeType}`);
+    const query = '?' + queryParams.join('&');
     return await fetch(path + query, {
         method: 'GET',
         headers: {
@@ -66,9 +73,12 @@ async function network_nodeGet(uuid, auth, hash, raw = false) {
     });
 }
 
-async function network_nodePost(payload, detailsObj) {
+async function network_nodePost(payload, detailsObj, treeType = 'home') {
     const formData = new FormData();
     formData.append('blob', new Blob([payload], { type: 'application/octet-stream' }));
+    if (detailsObj.root && !detailsObj.tree_type) {
+        detailsObj.tree_type = treeType;
+    }
     formData.append('details', JSON.stringify(detailsObj));
     return await fetch('/node', {
         method: 'POST',

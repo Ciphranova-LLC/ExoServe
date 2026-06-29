@@ -4,3 +4,4 @@ uploads/*
 !uploads
 !uploads/.gitkeep
 users.db*
+.continue

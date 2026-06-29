@@ -11,6 +11,7 @@ function ui_signOut() {
 function ui_initContextMenu() {
     const contextMenu = document.getElementById('context-menu');
     const tbody = document.getElementById('file-table-body');
+
     tbody.addEventListener('contextmenu', (event) => {
         // Find the closest table row that was clicked
         const row = event.target.closest('tr');
@@ -30,7 +31,37 @@ function ui_initContextMenu() {
             key: row.getAttribute('data-key'),
             name: row.getAttribute('data-name'),
             type: row.classList.contains('folder-row') ? 'folder' : 'file',
+            path: row.getAttribute('data-path') || null,
         };
+
+        // Update context menu based on location (home vs trash)
+        const isHomePage = window.location.pathname.startsWith('/home');
+        const deleteItem = contextMenu.querySelector('.text-danger');
+        const restoreItem = document.getElementById('context-restore');
+
+        if (isHomePage) {
+            // Home page: Show "Delete" option
+            deleteItem.innerHTML = '<img src="static/img/trashcan.svg" /> Move to Trash';
+            deleteItem.setAttribute('onclick', "ui_showYesNoModal('Move to trash: ', 'ui_submitDelete()')");
+
+            // Hide restore button on Home view
+            if (restoreItem) restoreItem.style.display = 'none';
+        } else {
+            // Trash page: Show "Permanently Delete" and "Restore" options
+            deleteItem.innerHTML = '<img src="static/img/trashcan.svg" /> Permanently Delete';
+            deleteItem.setAttribute(
+                'onclick',
+                "ui_showYesNoModal('Permanently delete ', 'ui_submitDelete()')"
+            );
+
+            if (restoreItem) {
+                restoreItem.style.display = 'block';
+                restoreItem.setAttribute(
+                    'onclick',
+                    "ui_showYesNoModal('Restore ', 'ui_submitRestore()')"
+                );
+            }
+        }
 
         // Calculate Position (with edge detection)
         let x = event.clientX;
@@ -99,9 +130,15 @@ function ui_submitNewFolderModal() {
 
 /******************************/
 
-function ui_showYesNoModal(question) {
+function ui_showYesNoModal(question, callbackStr) {
     const dialog = document.getElementById('modal-yesno');
-    document.getElementById('yesno-question').innerHTML = question + activeContextNode.name + '?';
+    document.getElementById('yesno-question').innerHTML =
+        question + escapeHtml(activeContextNode.name) + '?';
+    const confirmBtn = document.getElementById('btn-yesno-confirm');
+    if (confirmBtn && callbackStr) {
+        confirmBtn.setAttribute('onclick', callbackStr);
+    }
+
     dialog.showModal();
 }
 
@@ -114,17 +151,162 @@ function ui_submitDelete() {
     const dialog = document.getElementById('modal-yesno');
     const crumbs = Array.from(document.querySelectorAll('.crumb'));
 
-    e2ee_walkMerkleTree(crumbs, activeContextNode.name, null)
-        .then((_) => {
-            dialog.close();
-            __e2ee_refreshTableView(crumbs).then(() =>
-                ui_showToast(`Deleted ${activeContextNode.name}`)
-            );
-        })
-        .catch((err) => {
-            console.error('Failed to delete node:', err);
-            ui_showToast(`Failed to delete ${activeContextNode.name}`);
-        });
+    if (window.location.pathname.startsWith('/home')) {
+        // Create a virtual crumb representing the root of the Trash tree
+        let trashVHash = null;
+        let trashVKey = null;
+
+        const destCrumbs = [
+            {
+                innerText: 'Trash',
+                textContent: 'Trash',
+                getAttribute: (attr) => {
+                    if (attr === 'data-hash') return trashVHash;
+                    if (attr === 'data-key') return trashVKey;
+                    if (attr === 'data-name') return 'Trash';
+                    if (attr === 'data-tree-type') return 'trash';
+                    return null;
+                },
+                setAttribute: (attr, val) => {
+                    if (attr === 'data-hash') trashVHash = val;
+                    if (attr === 'data-key') trashVKey = val;
+                },
+            },
+        ];
+
+        // Move to trash using the new generalized function
+        e2ee_moveNode(
+            activeContextNode.hash,
+            activeContextNode.key,
+            activeContextNode.name,
+            crumbs,
+            destCrumbs
+        )
+            .then((_) => {
+                dialog.close();
+                ui_showToast(`Moved ${activeContextNode.name} to trash`);
+            })
+            .catch((err) => {
+                console.error('Failed to move to trash:', err);
+                ui_showToast(`Failed to move ${activeContextNode.name} to trash`);
+            });
+    } else {
+        // Permanent deletion for trash page
+        e2ee_walkMerkleTree(crumbs, activeContextNode.name, null)
+            .then((_) => {
+                dialog.close();
+                __e2ee_refreshTableView(crumbs).then(() =>
+                    ui_showToast(`Permanently deleted ${activeContextNode.name}`)
+                );
+            })
+            .catch((err) => {
+                console.error('Failed to delete node:', err);
+                ui_showToast(`Failed to delete ${activeContextNode.name}`);
+            });
+    }
+}
+
+async function ui_submitRestore() {
+    // Gather required data
+    const dialog = document.getElementById('modal-yesno');
+    const sourceCrumbs = Array.from(document.querySelectorAll('.crumb'));
+    const uuid = sessionStorage.getItem('uuid');
+    const authToken = sessionStorage.getItem('auth_token');
+
+    try {
+        // Resolve the Home root to start building the destination crumbs
+        const homeRootRes = await network_nodeGet(uuid, authToken, 'root', true, 'home');
+        if (homeRootRes.status !== 200) {
+            throw new Error('Could not find Home root.');
+        }
+        const homeRootData = await homeRootRes.json();
+
+        // Initialize the virtual destination breadcrumbs
+        let vHash = homeRootData['root'];
+        let vKey = 'null';
+        const destCrumbs = [
+            {
+                innerText: 'Home',
+                textContent: 'Home',
+                getAttribute: (attr) => {
+                    if (attr === 'data-hash') return vHash;
+                    if (attr === 'data-key') return vKey;
+                    if (attr === 'data-name') return 'Home';
+                    if (attr === 'data-tree-type') return 'home';
+                    return null;
+                },
+                setAttribute: (attr, val) => {
+                    if (attr === 'data-hash') vHash = val;
+                    if (attr === 'data-key') vKey = val;
+                },
+            },
+        ];
+
+        // Parse the original parent path
+        let pathSegments = [];
+        if (activeContextNode.path) {
+            pathSegments = activeContextNode.path.split('/').filter((s) => s.length > 0);
+        }
+
+        // Remove the Home segment since it's already included
+        if (pathSegments.length > 0 && pathSegments[0] === 'Home') {
+            pathSegments.shift();
+        }
+
+        // Traverse the path and ensure it still exists
+        for (const folderName of pathSegments) {
+            let folderResult;
+
+            try {
+                folderResult = await __e2ee_ensureFolderExists(folderName, destCrumbs, false);
+            } catch (e) {
+                ui_showToast(`Restore failed: Destination "${folderName}" is a file.`);
+                if (dialog) dialog.close();
+                return;
+            }
+
+            if (!folderResult) {
+                ui_showToast(`Restore failed: Destination folder "${folderName}" does not exist.`);
+                if (dialog) dialog.close();
+                return;
+            }
+
+            let childHash = folderResult.hash;
+            let childKey = folderResult.key;
+
+            destCrumbs.push({
+                innerText: folderName,
+                textContent: folderName,
+                getAttribute: (attr) => {
+                    if (attr === 'data-hash') return childHash;
+                    if (attr === 'data-key') return childKey;
+                    if (attr === 'data-name') return folderName;
+                    if (attr === 'data-tree-type') return 'home';
+                    return null;
+                },
+                setAttribute: (attr, val) => {
+                    if (attr === 'data-hash') childHash = val;
+                    if (attr === 'data-key') childKey = val;
+                },
+            });
+        }
+
+        // Perform the move
+        await e2ee_moveNode(
+            activeContextNode.hash,
+            activeContextNode.key,
+            activeContextNode.name,
+            sourceCrumbs,
+            destCrumbs
+        );
+
+        if (dialog) dialog.close();
+        ui_showToast(`Restored ${activeContextNode.name}`);
+    } catch (err) {
+        console.error('Failed to restore:', err);
+        ui_showToast(`Failed to restore ${activeContextNode.name}`);
+        if (dialog) dialog.close();
+    }
 }
 
 /******************************/

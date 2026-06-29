@@ -12,6 +12,7 @@ class MerkleMutex {
         this._uuid = sessionStorage.getItem('uuid');
         this._auth = sessionStorage.getItem('auth_token');
         this._version = null;
+        this._activeTreeType = null;
     }
 
     _generateKey() {
@@ -21,7 +22,7 @@ class MerkleMutex {
         return btoa(binary);
     }
 
-    async _tryLock() {
+    async _tryLock(treeType) {
         const maxRetries = 30;
         let retries = 0;
         let delay = 100;
@@ -29,27 +30,20 @@ class MerkleMutex {
         while (true) {
             const key = this._generateKey();
             try {
-                const res = await network_lockAcquire(this._uuid, this._auth, key);
+                const lockRes = await network_lockAcquire(this._uuid, this._auth, key, treeType);
 
-                if (!res.ok) {
-                    throw new Error(`Lock acquire network error: ${res.status}`);
-                }
-
-                const data = await res.json();
-
-                if (data.status === 'success') {
+                if (lockRes) {
                     this._lockKey = key;
-                    this._version = data.version || null;
+                    this._version = lockRes;
+                    this._activeTreeType = treeType;
                     return;
-                } else if (data.status === 'busy') {
+                } else {
                     retries++;
                     if (retries > maxRetries) {
                         throw new Error('Failed to acquire lock after maximum retries');
                     }
                     await new Promise((res) => setTimeout(res, delay));
                     delay = Math.min(delay * 2, 2000);
-                } else {
-                    throw new Error(`Lock acquire failed: ${data.status}`);
                 }
             } catch (e) {
                 throw new Error(`Network error during lock acquire: ${e.message}`);
@@ -58,6 +52,15 @@ class MerkleMutex {
     }
 
     async acquire(crumbs) {
+        // Determine the tree type to lock.
+        let targetTreeType = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
+        if (crumbs && crumbs.length > 0) {
+            const explicitType = crumbs[0].getAttribute('data-tree-type');
+            if (explicitType) {
+                targetTreeType = explicitType;
+            }
+        }
+
         // If no crumbs, just acquire the lock without validation (first page load)
         if (!crumbs || crumbs.length === 0) {
             const wasLocked = this._locked;
@@ -68,7 +71,7 @@ class MerkleMutex {
                 });
             }
             try {
-                await this._tryLock();
+                await this._tryLock(targetTreeType);
             } catch (error) {
                 this._locked = false;
                 throw error;
@@ -86,7 +89,7 @@ class MerkleMutex {
         }
 
         try {
-            await this._tryLock();
+            await this._tryLock(targetTreeType);
             await breadcrumbs_syncPathFromServer(crumbs, this._version);
         } catch (error) {
             this._locked = false;
@@ -114,6 +117,7 @@ class MerkleMutex {
         } finally {
             this._lockKey = null;
             this._version = null;
+            this._activeTreeType = null;
 
             if (this._queue.length > 0) {
                 const nextTask = this._queue.shift();
@@ -143,9 +147,12 @@ function escapeHtml(str) {
 
 // Helper to detach background tasks from live UI DOM elements
 function __e2ee_createVirtualCrumbs(domCrumbs) {
+    const currentTreeType = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
+
     return Array.from(domCrumbs).map((c) => {
         let vHash = c.getAttribute('data-hash');
         let vKey = c.getAttribute('data-key');
+        let vTreeType = currentTreeType;
         let vName = c.getAttribute('data-name') || c.innerText || c.textContent;
 
         return {
@@ -155,11 +162,13 @@ function __e2ee_createVirtualCrumbs(domCrumbs) {
                 if (attr === 'data-hash') return vHash;
                 if (attr === 'data-key') return vKey;
                 if (attr === 'data-name') return vName;
+                if (attr === 'data-tree-type') return vTreeType;
                 return null;
             },
             setAttribute: (attr, val) => {
                 if (attr === 'data-hash') vHash = val;
                 if (attr === 'data-key') vKey = val;
+                if (attr === 'data-tree-type') vTreeType = val;
             },
         };
     });
@@ -184,11 +193,17 @@ async function __e2ee_uploadFile(file, crumbs, createToast = true) {
 }
 
 // Helper function to ensure a folder exists
-async function __e2ee_ensureFolderExists(folderName, crumbs) {
+async function __e2ee_ensureFolderExists(folderName, crumbs, create = true, hasLock = false) {
     // Acquire lock so this is actually valid
-    await treeLock.acquire(crumbs);
+    if (!hasLock) await treeLock.acquire(crumbs);
 
     try {
+        // Determine treeType from crumbs
+        let treeType = 'home';
+        if (crumbs && crumbs.length > 0) {
+            treeType = crumbs[0].getAttribute('data-tree-type') || 'home';
+        }
+
         // Get the youngest crumb and its data
         const parentCrumb = crumbs[crumbs.length - 1];
         const parentHash = parentCrumb.getAttribute('data-hash');
@@ -196,7 +211,7 @@ async function __e2ee_ensureFolderExists(folderName, crumbs) {
 
         // Fetch and decrypt the parent folder contents
         const keyObj = await e2ee_parseKey(KeyType.B64, parentKey);
-        const parentFolder = await e2ee_fetchFolder(parentHash, keyObj);
+        const parentFolder = await e2ee_fetchFolder(parentHash, keyObj, treeType);
 
         // If the item already exists and is a folder, return its details
         const existingItem = parentFolder.children ? parentFolder.children[folderName] : null;
@@ -208,13 +223,18 @@ async function __e2ee_ensureFolderExists(folderName, crumbs) {
                 };
             } else {
                 throw new Error(
-                    `Cannot create folder "${folderName}". A file with that name already exists.`
+                    `Cannot resolve folder "${folderName}". A file with that name already exists.`
                 );
             }
         }
 
+        // If we are not supposed to create it, return null to signal it's missing
+        if (!create) {
+            return null;
+        }
+
         // Else, create a new empty folder
-        const newFolderData = await e2ee_newFolder(null, folderName, crumbs, true);
+        const newFolderData = await e2ee_newFolder(null, folderName, crumbs, true, treeType);
 
         // Update the parent crumb
         parentCrumb.setAttribute('data-hash', newFolderData.parentHash);
@@ -225,14 +245,20 @@ async function __e2ee_ensureFolderExists(folderName, crumbs) {
             key: newFolderData.key,
         };
     } finally {
-        await treeLock.release();
+        if (!hasLock) await treeLock.release();
     }
 }
 
-// Helper function to unconditionally reload the table view
-async function __e2ee_refreshTableView() {
+// Helper function to conditionally reload the table view
+async function __e2ee_refreshTableView(hasLock = false) {
+    const uiTreeType = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
+    const operationTreeType = treeLock._locked ? treeLock._activeTreeType : uiTreeType;
+    if (operationTreeType && operationTreeType !== uiTreeType) {
+        return;
+    }
+
     const crumbs = breadcrumb_elem.children;
-    await treeLock.acquire(crumbs);
+    if (!hasLock) await treeLock.acquire(crumbs);
 
     try {
         const activeCrumb = crumbs[crumbs.length - 1];
@@ -242,8 +268,17 @@ async function __e2ee_refreshTableView() {
         const keyObj = await e2ee_parseKey(KeyType.B64, activeKey);
         await filetable_table.goToFolder(activeHash, keyObj, activeName, false, true);
     } finally {
-        await treeLock.release();
+        if (!hasLock) await treeLock.release();
     }
+}
+
+// Helper function to build the full path from crumbs
+function __e2ee_buildPathFromCrumbs(crumbs) {
+    let here = '/';
+    for (const crumb of breadcrumb_elem.children) {
+        here += crumb.getAttribute('data-name') + '/';
+    }
+    return here;
 }
 
 // Arm the service worker with a key
@@ -488,6 +523,10 @@ async function e2ee_uploadFolder(crumbs) {
 
             // Detach base crumbs from live UI before the loop begins
             const virtualBaseCrumbs = __e2ee_createVirtualCrumbs(crumbs);
+            const vTreeType =
+                virtualBaseCrumbs.length > 0
+                    ? virtualBaseCrumbs[0].getAttribute('data-tree-type')
+                    : 'home';
 
             for (let i = 0; i < files.length; i++) {
                 // Update the progress UI
@@ -512,7 +551,13 @@ async function e2ee_uploadFolder(crumbs) {
                         innerText: folderName,
                         textContent: folderName,
                         getAttribute: (attr) =>
-                            attr === 'data-hash' ? vHash : attr === 'data-key' ? vKey : null,
+                            attr === 'data-hash'
+                                ? vHash
+                                : attr === 'data-key'
+                                  ? vKey
+                                  : attr === 'data-tree-type'
+                                    ? vTreeType
+                                    : null,
                         setAttribute: (attr, val) => {
                             if (attr === 'data-hash') vHash = val;
                             if (attr === 'data-key') vKey = val;
@@ -578,13 +623,13 @@ async function e2ee_encryptWhole(data, keyObj) {
 }
 
 // Fetch a folder from the server
-async function e2ee_fetchFolder(id, keyObj) {
+async function e2ee_fetchFolder(id, keyObj, tree_type = 'home') {
     // Get the Session Storage items
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
 
     // Fetch raw bytes
-    const res = await network_nodeGet(uuid, authToken, id, true);
+    const res = await network_nodeGet(uuid, authToken, id, true, tree_type);
     if (!res.ok) throw new Error('Failed to fetch folder from server');
 
     // Decrypt in the main thread
@@ -607,7 +652,8 @@ async function e2ee_newFolder(
     keyObj = null,
     folderName = 'New Folder',
     crumbs = [],
-    hasLock = false
+    hasLock = false,
+    treeType = 'home'
 ) {
     // Generate a random key or get the root key
     const isRoot = keyObj !== null;
@@ -626,13 +672,17 @@ async function e2ee_newFolder(
 
     try {
         // Make request to create the new folder
-        const res = await network_nodePost(combinedData['data'], {
-            root: isRoot,
-            checksum: combinedData['hash'],
-            lock_key: treeLock._lockKey,
-            uuid: sessionStorage.getItem('uuid'),
-            auth: sessionStorage.getItem('auth_token'),
-        });
+        const res = await network_nodePost(
+            combinedData['data'],
+            {
+                root: isRoot,
+                checksum: combinedData['hash'],
+                lock_key: treeLock._lockKey,
+                uuid: sessionStorage.getItem('uuid'),
+                auth: sessionStorage.getItem('auth_token'),
+            },
+            treeType
+        );
 
         if (!res.ok) {
             throw new Error(`Server rejected folder creation: ${res.status}`);
@@ -795,10 +845,19 @@ async function e2ee_walkMerkleTree(
     newChildName,
     newChildMetadata,
     hasLock = false,
-    oldChildName = null
+    oldChildName = null,
+    skipDeletion = false
 ) {
     // Validate the breadcrumbs were given
     if (crumbs.length === 0) return null;
+
+    // Determine which tree we're operating on based on the in-memory array
+    let treeType = 'home';
+    if (crumbs && crumbs.length > 0) {
+        treeType =
+            crumbs[0].getAttribute('data-tree-type') ||
+            (window.location.pathname.startsWith('/trash') ? 'trash' : 'home');
+    }
 
     // Do not allow concurrent walkers
     if (!hasLock) await treeLock.acquire(crumbs);
@@ -817,14 +876,21 @@ async function e2ee_walkMerkleTree(
 
             // Fetch the parent folder
             const keyObj = await e2ee_parseKey(KeyType.B64, parentKeyBase64);
-            const parent = await e2ee_fetchFolder(parentHash, keyObj);
+            const parent = await e2ee_fetchFolder(parentHash, keyObj, treeType);
 
             // For the active directory, handle overwrites or deletions
             if (i === crumbs.length - 1 && currChildName in parent['children']) {
                 const oldChild = parent['children'][currChildName];
                 if (!currChildMetadata || oldChild['hash'] !== currChildMetadata['hash']) {
-                    const childKeyObj = await e2ee_parseKey(KeyType.B64, oldChild['key']);
-                    await e2ee_deleteNode(oldChild['hash'], oldChild['type'], childKeyObj);
+                    if (!skipDeletion) {
+                        const childKeyObj = await e2ee_parseKey(KeyType.B64, oldChild['key']);
+                        await e2ee_deleteNode(
+                            oldChild['hash'],
+                            oldChild['type'],
+                            childKeyObj,
+                            true
+                        );
+                    }
                 }
             }
 
@@ -833,7 +899,6 @@ async function e2ee_walkMerkleTree(
                 if (oldChildName && oldChildName !== currChildName) {
                     delete parent['children'][oldChildName];
                 }
-
                 if (!currChildMetadata) {
                     delete parent['children'][currChildName];
                 } else {
@@ -863,14 +928,18 @@ async function e2ee_walkMerkleTree(
             }
 
             // Upload the new parent to the server
-            await network_nodePost(combinedData['data'], {
-                root: isRoot,
-                checksum: newParentHash,
-                stale: parentHash,
-                lock_key: treeLock._lockKey,
-                uuid: sessionStorage.getItem('uuid'),
-                auth: sessionStorage.getItem('auth_token'),
-            });
+            await network_nodePost(
+                combinedData['data'],
+                {
+                    root: isRoot,
+                    checksum: newParentHash,
+                    stale: parentHash,
+                    lock_key: treeLock._lockKey,
+                    uuid: sessionStorage.getItem('uuid'),
+                    auth: sessionStorage.getItem('auth_token'),
+                },
+                treeType
+            );
 
             // Shift the scope to the next breadcrumb
             currChildName = crumb.getAttribute('data-name') || crumb.textContent.trim();
@@ -885,37 +954,181 @@ async function e2ee_walkMerkleTree(
     return returnHash;
 }
 
+// General function to move a node between any two locations
+async function e2ee_moveNode(
+    nodeHash,
+    nodeKey,
+    nodeName,
+    sourceCrumbs,
+    destCrumbs,
+    hasLock = false
+) {
+    // Validate inputs
+    if (
+        !nodeHash ||
+        !nodeKey ||
+        !sourceCrumbs ||
+        sourceCrumbs.length === 0 ||
+        !destCrumbs ||
+        destCrumbs.length === 0
+    ) {
+        console.error('e2ee_moveNode: Invalid arguments');
+        return;
+    }
+
+    // Get session info
+    const uuid = sessionStorage.getItem('uuid');
+    const authToken = sessionStorage.getItem('auth_token');
+    if (!uuid || !authToken) {
+        throw new Error('Missing authentication credentials');
+    }
+
+    // Acquire lock if not already held
+    if (!hasLock) await treeLock.acquire(sourceCrumbs);
+
+    try {
+        // Determine tree types
+        const sourceTreeType = sourceCrumbs[0].getAttribute('data-tree-type') || 'home';
+        const destTreeType = destCrumbs[0].getAttribute('data-tree-type') || 'home';
+
+        // If moving cross-tree, the destination crumbs were not synced by the lock.
+        // Fetch the latest destination root (and create it if it doesn't exist yet).
+        if (destTreeType !== sourceTreeType) {
+            const destRootRes = await network_nodeGet(uuid, authToken, 'root', true, destTreeType);
+            let latestDestRootHash;
+            if (destRootRes.status === 204) {
+                const destRootKeyObj = await e2ee_parseKey(KeyType.ROOT);
+                const rootName = destTreeType === 'trash' ? 'Trash' : 'Home';
+                const newFolderData = await e2ee_newFolder(
+                    destRootKeyObj,
+                    rootName,
+                    [],
+                    true,
+                    destTreeType
+                );
+                latestDestRootHash = newFolderData.hash;
+            } else {
+                const destRootData = await destRootRes.json();
+                latestDestRootHash = destRootData['root'];
+            }
+            await breadcrumbs_syncPathFromServer(destCrumbs, latestDestRootHash);
+        }
+
+        // Extract the node from the source
+        const sourceParentCrumb = sourceCrumbs[sourceCrumbs.length - 1];
+        const sourceParentHash = sourceParentCrumb.getAttribute('data-hash');
+        const sourceParentKey = sourceParentCrumb.getAttribute('data-key');
+        const sourceParentKeyObj = await e2ee_parseKey(KeyType.B64, sourceParentKey);
+
+        const sourceParentFolder = await e2ee_fetchFolder(
+            sourceParentHash,
+            sourceParentKeyObj,
+            sourceTreeType
+        );
+        const nodeMetadata = sourceParentFolder.children[nodeName];
+        if (!nodeMetadata) {
+            throw new Error(`Node "${nodeName}" not found in source folder`);
+        }
+
+        // Prepare the metadata for the destination
+        let newNodeMetadata = { ...nodeMetadata };
+
+        // If moving to the trash, include the original path and deletion timestamp
+        if (destTreeType === 'trash') {
+            let originalPath = '/';
+            for (const crumb of sourceCrumbs) {
+                originalPath +=
+                    (crumb.getAttribute('data-name') || crumb.innerText || crumb.textContent) + '/';
+            }
+
+            newNodeMetadata.deleted = Date.now();
+            newNodeMetadata.path = originalPath;
+        }
+
+        // Add the node to the destination tree
+        await e2ee_walkMerkleTree(destCrumbs, nodeName, newNodeMetadata, true, null, false);
+
+        // Sync the updated hashes from sourceCrumbs to destCrumbs
+        if (sourceTreeType === destTreeType) {
+            const minLength = Math.min(sourceCrumbs.length, destCrumbs.length);
+            for (let i = 0; i < minLength; i++) {
+                const sourceCrumbName =
+                    sourceCrumbs[i].getAttribute('data-name') ||
+                    sourceCrumbs[i].innerText ||
+                    sourceCrumbs[i].textContent;
+                const destCrumbName =
+                    destCrumbs[i].getAttribute('data-name') ||
+                    destCrumbs[i].innerText ||
+                    destCrumbs[i].textContent;
+
+                if (sourceCrumbName === destCrumbName) {
+                    const freshHash = destCrumbs[i].getAttribute('data-hash');
+                    sourceCrumbs[i].setAttribute('data-hash', freshHash);
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // Remove the node from the source tree
+        await e2ee_walkMerkleTree(sourceCrumbs, nodeName, null, true, null, true);
+
+        // Refresh the table view
+        await __e2ee_refreshTableView(true);
+
+        return true;
+    } catch (error) {
+        console.error('e2ee_moveNode failed:', error);
+        throw error;
+    } finally {
+        if (!hasLock) await treeLock.release();
+    }
+}
+
 // Recursively delete files from the server
-async function e2ee_deleteNode(hash, type, keyObj) {
+async function e2ee_deleteNode(hash, type, keyObj, hasLock = false) {
     // Validate that there is a hash
     if (!hash) return;
 
-    // Folders must be recursed
-    if (type === 'folder') {
-        try {
-            const folderData = await e2ee_fetchFolder(hash, keyObj);
-            if (folderData && folderData.children) {
-                const deletePromises = Object.entries(folderData.children).map(
-                    async ([_, childMeta]) => {
-                        const childKeyObj = await e2ee_parseKey(KeyType.B64, childMeta.key);
-                        return e2ee_deleteNode(childMeta.hash, childMeta.type, childKeyObj);
-                    }
-                );
-                await Promise.all(deletePromises);
+    // Acquire a lock
+    const crumbs = Array.from(document.querySelectorAll('.crumb'));
+    if (!hasLock) await treeLock.acquire(crumbs);
+
+    try {
+        // Folders must be recursed
+        if (type === 'folder') {
+            try {
+                const folderData = await e2ee_fetchFolder(hash, keyObj);
+                if (folderData && folderData.children) {
+                    const deletePromises = Object.entries(folderData.children).map(
+                        async ([_, childMeta]) => {
+                            const childKeyObj = await e2ee_parseKey(KeyType.B64, childMeta.key);
+                            return e2ee_deleteNode(
+                                childMeta.hash,
+                                childMeta.type,
+                                childKeyObj,
+                                hasLock
+                            );
+                        }
+                    );
+                    await Promise.all(deletePromises);
+                }
+            } catch (e) {
+                console.error(`Failed to traverse folder ${hash} for deletion:`, e);
             }
-        } catch (e) {
-            console.error(`Failed to traverse folder ${hash} for deletion:`, e);
         }
+
+        // Delete the blob itself
+        const uuid = sessionStorage.getItem('uuid');
+        const authToken = sessionStorage.getItem('auth_token');
+        const lockKey = encodeURIComponent(treeLock._lockKey);
+        await network_nodeDelete(uuid, authToken, hash, lockKey);
+
+        // Delete the key from IndexedDB
+        await keyDB.deleteKey(hash);
+    } finally {
+        if (!hasLock) await treeLock.release();
     }
-
-    // Delete the blob itself
-    const uuid = sessionStorage.getItem('uuid');
-    const authToken = sessionStorage.getItem('auth_token');
-    const lockKey = encodeURIComponent(treeLock._lockKey);
-    await network_nodeDelete(uuid, authToken, hash, lockKey);
-
-    // Delete the key from IndexedDB
-    await keyDB.deleteKey(hash);
 }
 
 // Listen for messages from the Service Worker

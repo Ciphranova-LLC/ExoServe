@@ -79,10 +79,7 @@ class FileTable {
         let theadHtml = '<tr>';
         for (let i = 0; i < this.columnConfig.length; i++) {
             const col = this.columnConfig[i];
-            const colClass =
-                col.type === 'checkbox'
-                    ? 'column-checkbox'
-                    : 'column-cell';
+            const colClass = col.type === 'checkbox' ? 'column-checkbox' : 'column-cell';
             const sortableClass = col.sortable !== false ? 'sortable' : '';
             const thId =
                 col.type === 'checkbox'
@@ -91,9 +88,10 @@ class FileTable {
                       ? this.nameHeaderId
                       : `header-${col.type}-${i}`;
 
-            const innerContent = col.type === 'checkbox' 
-                ? '<input class="checkbox-header" type="checkbox" />' 
-                : col.title;
+            const innerContent =
+                col.type === 'checkbox'
+                    ? '<input class="checkbox-header" type="checkbox" />'
+                    : col.title;
 
             theadHtml += `<th id="${thId}" class="${colClass} ${sortableClass}">${innerContent}</th>`;
         }
@@ -240,13 +238,15 @@ class FileTable {
             const size = data.size || 0;
             const hash = data.hash || '';
             const key = data.key || null;
+            // Extract the path safely, escaping quotes so it doesn't break the HTML attribute
+            const path = data.path ? String(data.path).replace(/"/g, '&quot;') : '';
 
             // Build row based on column config
             let rowHtml = '<tr';
             if (data.type === 'folder') {
-                rowHtml += ` class="folder-row" data-name="${name}" data-hash="${hash}" data-key="${key}" onclick="filetable_table.goToFolderElem(this)"`;
+                rowHtml += ` class="folder-row" data-name="${name}" data-hash="${hash}" data-key="${key}" data-path="${path}" onclick="filetable_table.goToFolderElem(this)"`;
             } else {
-                rowHtml += ` class="file-row" data-hash="${hash}" data-key="${key}" data-name="${name}" onclick="carousel_update(this)"`;
+                rowHtml += ` class="file-row" data-hash="${hash}" data-key="${key}" data-name="${name}" data-path="${path}" onclick="carousel_update(this)"`;
             }
             rowHtml += '>';
 
@@ -365,7 +365,11 @@ class FileTable {
                     await resolveNavigationTarget(hash, keyObj, name, hereHash_1, crumbTargetI);
 
                 // Fetch the folder and build the table
-                const targetFolderJson = await e2ee_fetchFolder(finalHash, finalKeyObj);
+                const targetFolderJson = await e2ee_fetchFolder(
+                    finalHash,
+                    finalKeyObj,
+                    keyhandler_getCurrentTreeType()
+                );
                 this.build(targetFolderJson.children);
 
                 // Update Breadcrumbs
@@ -416,7 +420,11 @@ async function filetable_goToFolderStandard(hash, keyObj, name, currentHereHash,
     else if (currentHereHash !== hereHash_2) {
         const hereKey = hereCrumb_2.getAttribute('data-key');
         const hereKeyObj = await e2ee_parseKey(KeyType.B64, hereKey);
-        const hereFolderJson = await e2ee_fetchFolder(hereHash_2, hereKeyObj);
+        const hereFolderJson = await e2ee_fetchFolder(
+            hereHash_2,
+            hereKeyObj,
+            keyhandler_getCurrentTreeType()
+        );
 
         const targetMeta = hereFolderJson.children[name];
         if (targetMeta) {
@@ -517,9 +525,20 @@ async function filetable_goToFolderSearch(hash, keyObj, name, currentHereHash) {
 // Global instance of the home table
 let filetable_table = null;
 
-document.addEventListener('DOMContentLoaded', () => {
-    // Initialize the file table based on the path
-    if (window.location.pathname.startsWith('/home')) {
+// Routing & View Configuration Logic
+function app_initTableConfig(path) {
+    // Clear out the old state entirely
+    if (filetable_table) {
+        filetable_table.clear();
+    }
+
+    const breadcrumbList = document.getElementById('breadcrumb-list');
+    if (breadcrumbList) breadcrumbList.innerHTML = '';
+
+    const actionButtons = document.getElementById('app-action-buttons');
+
+    if (path.startsWith('/home')) {
+        if (actionButtons) actionButtons.style.display = 'flex';
         filetable_table = new FileTable({
             tbodyId: 'file-table-body',
             checkboxHeaderId: 'header-checkbox',
@@ -539,7 +558,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 { type: 'size', title: 'Size', width: '10%', sortable: true, dataKey: 'size' },
             ],
         });
-    } else if (window.location.pathname.startsWith('/trash')) {
+    } else if (path.startsWith('/trash')) {
+        if (actionButtons) actionButtons.style.display = 'none';
         filetable_table = new FileTable({
             tbodyId: 'file-table-body',
             checkboxHeaderId: 'header-checkbox',
@@ -566,7 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Setup checkbox header listener
+    // Re-apply the global header listener from the original script
     const checkbox_header = document.querySelector('.checkbox-header');
     if (checkbox_header) {
         checkbox_header.addEventListener('change', function () {
@@ -574,4 +594,31 @@ document.addEventListener('DOMContentLoaded', () => {
             current_rows.forEach((checkbox) => (checkbox.checked = checkbox_header.checked));
         });
     }
+}
+
+function app_navigateTo(view) {
+    const targetPath = '/' + view;
+    // Don't re-render if already at the target
+    if (window.location.pathname === targetPath) return;
+
+    // Update the browser URL
+    window.history.pushState({}, '', targetPath);
+
+    // Re-initialize the table
+    app_initTableConfig(targetPath);
+
+    // Broadcast to the rest of the application that the view changed
+    window.dispatchEvent(new CustomEvent('viewChanged', { detail: { view: view } }));
+}
+
+// Handle the user clicking the physical "Back" / "Forward" buttons in their browser
+window.addEventListener('popstate', () => {
+    app_initTableConfig(window.location.pathname);
+    const currentView = window.location.pathname.substring(1);
+    window.dispatchEvent(new CustomEvent('viewChanged', { detail: { view: currentView } }));
+});
+
+// Initial boot
+document.addEventListener('DOMContentLoaded', () => {
+    app_initTableConfig(window.location.pathname);
 });

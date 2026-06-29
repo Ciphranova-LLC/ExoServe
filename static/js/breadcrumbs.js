@@ -83,6 +83,11 @@ async function breadcrumbs_syncPathFromServer(crumbs, version) {
     // Refuse if there are no crumbs
     if (!crumbs || crumbs.length === 0) return;
 
+    // Extract tree type from the detached crumbs
+    const treeType =
+        crumbs[0].getAttribute('data-tree-type') ||
+        (window.location.pathname.startsWith('/trash') ? 'trash' : 'home');
+
     // Validate that updates need to be performed
     const rootCrumb = crumbs[0];
     const rootHash = rootCrumb.getAttribute('data-hash');
@@ -97,7 +102,7 @@ async function breadcrumbs_syncPathFromServer(crumbs, version) {
     const rootKeyBase64 = rootCrumb.getAttribute('data-key');
     const rootKeyObj = await e2ee_parseKey(KeyType.B64, rootKeyBase64);
     let currentHash = version;
-    let currentFolder = await e2ee_fetchFolder(currentHash, rootKeyObj);
+    let currentFolder = await e2ee_fetchFolder(currentHash, rootKeyObj, treeType);
 
     // Walk through each crumb and update its hash
     for (let i = 0; i < crumbs.length; i++) {
@@ -117,7 +122,7 @@ async function breadcrumbs_syncPathFromServer(crumbs, version) {
                 const childMeta = currentFolder.children[nextCrumbName];
                 currentHash = childMeta.hash;
                 const childKeyObj = await e2ee_parseKey(KeyType.B64, childMeta.key);
-                currentFolder = await e2ee_fetchFolder(currentHash, childKeyObj);
+                currentFolder = await e2ee_fetchFolder(currentHash, childKeyObj, treeType);
             } else {
                 console.error(`breadcrumbs_syncPathFromServer: Path broken at "${nextCrumbName}"`);
                 throw new Error(`Breadcrumb path invalid: "${nextCrumbName}" not found`);

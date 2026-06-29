@@ -54,8 +54,11 @@ def serve_index():
 
 @app.route('/home')
 def serve_home():
-    return render_template('home.html')
+    return render_template('app.html')
 
+@app.route('/trash')
+def serve_trash():
+    return render_template('app.html')
 
 @app.route('/login')
 def serve_login():
@@ -186,12 +189,15 @@ def lock_acquire():
     # Attempt to acquire the lock
     success, status = EXO_DATABASE.acquire_lock(uuid, key)
 
+    # Get the tree type from query parameter, default to 'home'
+    tree_type = request.args.get('type', 'home')
+
     # Get the root hash so the client knows the version they are modifying
-    root_hash = EXO_DATABASE.get_root_hash(uuid)
+    root_hashes = EXO_DATABASE.get_root_hashes(uuid)
 
     # Return the result
-    if success and root_hash:
-        return jsonify({"status": "success", "version": root_hash}), 200
+    if success and root_hashes:
+        return jsonify({"status": "success", "version": root_hashes}), 200
     elif status == 409:
         return jsonify({"status": "busy"}), 200
     return jsonify({"status": "fail"}), 400
@@ -237,7 +243,9 @@ def route_get_node(uuid, checksum):
 
     # If there is no checksum, assume the client wants the root checksum
     if checksum == 'root':
-        root_hash = EXO_DATABASE.get_root_hash(uuid)
+        tree_type = request.args.get('type', 'home')
+        root_hashes = EXO_DATABASE.get_root_hashes(uuid)
+        root_hash = None if root_hashes is None else root_hashes[tree_type]
         status = 200 if root_hash is not None else 204
         return jsonify({
             'root': root_hash,
@@ -268,8 +276,9 @@ def route_post_node():
     # Bypassed if there is no root node yet
     if details.get('root') or 'stale' in details:
         lock_key = details.get('lock_key')
-        root_hash = EXO_DATABASE.get_root_hash(uuid)
-        if root_hash and (not lock_key or not EXO_DATABASE.verify_lock(uuid, lock_key)):
+        tree_type = details.get('tree_type', 'home')
+        root_hashes = EXO_DATABASE.get_root_hashes(uuid)
+        if root_hashes[tree_type] is not None and (not lock_key or not EXO_DATABASE.verify_lock(uuid, lock_key)):
             return 'Active lock required for tree mutation', 423
 
     # Extract the request details and file payload
@@ -292,7 +301,7 @@ def route_post_node():
         state = load_upload_state(manifest)
         if details['chunk_index'] != state['index']:
             return 'Received chunks out of order', 403
-        
+
         # Append new data onto the target
         with staged_file.open('ab') as f:
             f.write(payload_data)
@@ -339,7 +348,8 @@ def route_post_node():
     # The full node (single or chunked) is safely in the sandbox
     # Update the database if modifying the root node
     if details.get('root'):
-        EXO_DATABASE.upsert_root_hash(uuid, final_checksum)
+        tree_type = details.get('tree_type', 'home')
+        EXO_DATABASE.upsert_root_hash(uuid, final_checksum, tree_type)
 
     # Delete the stale node if it exists
     if 'stale' in details:
@@ -381,8 +391,8 @@ def route_delete_node(uuid, checksum):
 def generate_dummy_user_row(uuid):
     # Use a thread-safe PRNG engine
     seed = hmac.new(
-        SERVER_SECRET.encode(), 
-        uuid.encode(), 
+        SERVER_SECRET.encode(),
+        uuid.encode(),
         hashlib.sha256
     ).digest()
 

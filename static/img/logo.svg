@@ -5,7 +5,7 @@
    width="210"
    height="210"
    id="svg3"
-   sodipodi:docname="favicon.svg"
+   sodipodi:docname="favicon_exoserve.svg"
    inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
    xml:space="preserve"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
@@ -22,15 +22,14 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#505050"
      inkscape:zoom="1.951278"
-     inkscape:cx="107.36553"
+     inkscape:cx="107.10929"
      inkscape:cy="112.49038"
      inkscape:window-width="2560"
      inkscape:window-height="1368"
      inkscape:window-x="0"
      inkscape:window-y="0"
      inkscape:window-maximized="1"
-     inkscape:current-layer="svg3"
-     showgrid="false" /><style
+     inkscape:current-layer="svg3" /><style
      id="style1">.a{fill:#fff}.b{fill:#be352d}.c{fill:#333}</style><path
      style="fill:#ffffff;fill-opacity:1;stroke-width:1.00043"
      d="M 104.72686,0 193.72855,35.211403 176.4187,142.88519 104.86281,210 33.125653,142.79457 16.271447,35.422406 Z"
@@ -58,4 +57,7 @@
        style="fill:#d7261b;fill-opacity:1"
        d="m 54.379853,132.02006 52.001727,47.99288 51.84451,-48.20182 13.42943,14.36446 -65.27394,59.81558 -65.319242,-59.81558 z"
        id="path16"
-       sodipodi:nodetypes="ccccccc" /></g></svg>
+       sodipodi:nodetypes="ccccccc" /></g><path
+     id="path18"
+     style="fill:#f3c407;fill-opacity:1;stroke-width:0.613027"
+     d="M 105,69.705271 A 35.321783,35.321783 0 0 0 69.677436,105.02784 35.321783,35.321783 0 0 0 105,140.3504 35.321783,35.321783 0 0 0 140.32256,105.02784 35.321783,35.321783 0 0 0 105,69.705271 Z m 0,12.50381 a 11.205584,11.205584 0 0 1 11.20509,11.206833 11.205584,11.205584 0 0 1 -5.23658,9.483916 l 5.38784,24.67729 H 93.643652 l 5.3322,-24.71206 A 11.205584,11.205584 0 0 1 93.794907,93.415914 11.205584,11.205584 0 0 1 105,82.209081 Z" /></svg>

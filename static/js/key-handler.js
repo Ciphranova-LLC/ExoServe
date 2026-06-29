@@ -5,6 +5,13 @@ const KeyType = Object.freeze({
     B64: Symbol('b64'),
 });
 
+// Helper to get the current tree type based on page path
+function keyhandler_getCurrentTreeType() {
+    const path = window.location.pathname;
+    if (path === '/trash') return 'trash';
+    return 'home';
+}
+
 // Global IndexedDB handler for securely storing CryptoKey objects
 const keyDB = {
     async _getStore(mode) {
@@ -88,7 +95,7 @@ async function keyhandler_generateUuidv8(seed) {
     ].join('-');
 }
 
-async function keyhandle_deriveKey(password, salt) {
+async function keyhandler_deriveKey(password, salt) {
     const enc = new TextEncoder();
     const material = await window.crypto.subtle.importKey(
         'raw',
@@ -108,7 +115,7 @@ async function keyhandle_deriveKey(password, salt) {
 
 async function keyhandler_register(username, password, salt) {
     // Derive the master key
-    const master = await keyhandle_deriveKey(password, salt);
+    const master = await keyhandler_deriveKey(password, salt);
 
     // Generate a random RSA key pair
     const pair = await window.crypto.subtle.generateKey(
@@ -165,7 +172,7 @@ async function keyhandler_login(username, password) {
         const nonce = b64toUint8(data['nonce']);
 
         // Derive and store the master key
-        const master = await keyhandle_deriveKey(password, salt);
+        const master = await keyhandler_deriveKey(password, salt);
         keyDB.setMasterKey(master, uuid);
 
         // Decrypt the private key
@@ -194,8 +201,55 @@ async function keyhandler_login(username, password) {
     }
 }
 
+async function keyhandler_loadRoot() {
+    const uuid = sessionStorage.getItem('uuid');
+    const authToken = sessionStorage.getItem('auth_token');
+
+    // Determine tree type based on current page
+    const treeType = keyhandler_getCurrentTreeType();
+    const keyObj = await e2ee_parseKey(KeyType.ROOT);
+
+    // Create a root node if one does not exist (pre-lock for new accounts)
+    const resInit = await network_nodeGet(uuid, authToken, 'root', true, treeType);
+    if (resInit.status === 204) {
+        const rootName = treeType === 'trash' ? 'Trash' : 'Home';
+        await e2ee_newFolder(keyObj, rootName, [], true, treeType);
+    } else if (resInit.status === 440) {
+        sessionStorage.removeItem('uuid');
+        sessionStorage.removeItem('auth_token');
+        if (window.location.pathname != '/login' && window.location.pathname != '/signup')
+            window.location.href = '/login?source=expire';
+        return false;
+    } else if (resInit.status !== 200) {
+        return false;
+    }
+
+    // Now a lock is acquired to ensure a valid root node is loaded
+    await treeLock.acquire([]);
+    try {
+        // Attempt to get the root node with tree type
+        const res = await network_nodeGet(uuid, authToken, 'root', true, treeType);
+
+        // Check for an expired session
+        if (res.status == 200) {
+            const rootHash = (await res.json())['root'];
+            const rootName = treeType === 'trash' ? 'Trash' : 'Home';
+            await filetable_table.goToFolder(rootHash, keyObj, rootName, true, true);
+        } else if (res.status === 440) {
+            sessionStorage.removeItem('uuid');
+            sessionStorage.removeItem('auth_token');
+            if (window.location.pathname != '/login' && window.location.pathname != '/signup')
+                window.location.href = '/login?source=expire';
+        } else {
+            return false;
+        }
+    } finally {
+        await treeLock.release();
+    }
+    return true;
+}
+
 async function keyhandler_check() {
-    // Get the Session Storage items
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
 
@@ -205,6 +259,7 @@ async function keyhandler_check() {
         sessionStorage.removeItem('auth_token');
         if (window.location.pathname != '/login' && window.location.pathname != '/signup')
             window.location.href = '/login';
+        return false;
     }
 
     // Get the IndexedDB master key
@@ -215,46 +270,11 @@ async function keyhandler_check() {
         sessionStorage.removeItem('auth_token');
         if (window.location.pathname != '/login' && window.location.pathname != '/signup')
             window.location.href = '/login';
-    }
-    const keyObj = await e2ee_parseKey(KeyType.ROOT);
-
-    // Create a root node if one does not exist (pre-lock for new accounts)
-    const res = await network_nodeGet(uuid, authToken, 'root', true);
-    if (res.status === 204) {
-        await e2ee_newFolder(keyObj, 'Home', [], true);
-    } else if (res.status === 440) {
-        sessionStorage.removeItem('uuid');
-        sessionStorage.removeItem('auth_token');
-        if (window.location.pathname != '/login' && window.location.pathname != '/signup')
-            window.location.href = '/login?source=expire';
-    } else if (res.status !== 200) {
         return false;
     }
 
-    // Now a lock is acquired to ensure a valid root node is loaded
-    await treeLock.acquire([]);
-    try {
-        // Attempt to get the root node
-        const res = await network_nodeGet(uuid, authToken, 'root', true);
-
-        // Check for an expired session
-        if (res.status == 200) {
-            rootHash = (await res.json())['root'];
-        } else if (res.status === 440) {
-            sessionStorage.removeItem('uuid');
-            sessionStorage.removeItem('auth_token');
-            if (window.location.pathname != '/login' && window.location.pathname != '/signup')
-                window.location.href = '/login?source=expire';
-        } else {
-            return false;
-        }
-
-        // Populate the UI with the root data
-        filetable_table.goToFolder(rootHash, keyObj, 'Home', true, true);
-    } finally {
-        await treeLock.release();
-    }
-    return true;
+    // Session is valid, load the applicable root directory
+    return await keyhandler_loadRoot();
 }
 
 // Try to load the service worker before checking for session data
@@ -262,6 +282,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     await navigator.serviceWorker.register('/sw.js');
     if (await keyhandler_check()) {
         const uuid_ui = document.getElementById('key-name');
-        uuid_ui.innerHTML = sessionStorage.getItem('uuid');
+        if (uuid_ui) uuid_ui.innerHTML = sessionStorage.getItem('uuid');
     }
+});
+
+// Listen for view changes to swap between home and trash
+window.addEventListener('viewChanged', async (e) => {
+    await keyhandler_loadRoot();
 });

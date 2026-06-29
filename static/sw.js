@@ -4,7 +4,7 @@ const tokenMap = new Map();
 
 // Constants
 const CHUNK_P_SIZE = 5 * 1024 * 1024; // 5MB Plaintext Chunk
-const CHUNK_E_SIZE = CHUNK_P_SIZE + 16; // 5MB + 16-byte Auth Tag
+const CHUNK_E_SIZE = CHUNK_P_SIZE + 16; // Plaintext Chunk + 16-byte Auth Tag
 
 // Helper to pull the CryptoKey object out of IndexedDB
 const keyDB = {
@@ -54,21 +54,19 @@ self.addEventListener('fetch', (event) => {
 
     // The File Routes
     if (url.pathname.includes('/node') && event.request.method === 'GET') {
-        url.searchParams.delete('raw');
-        const modifiedRequest = new Request(url.toString(), {
-            method: event.request.method,
-            headers: event.request.headers,
-            credentials: event.request.credentials,
-            mode: event.request.mode,
-            redirect: event.request.redirect,
-            referrer: event.request.referrer,
-            referrerPolicy: event.request.referrerPolicy,
-            body: event.request.body,
-        });
         if (event.request.url.includes('raw=true')) {
-            event.respondWith(fetch(modifiedRequest));
+            url.searchParams.delete('raw');
+            const reqInit = {
+                method: event.request.method,
+                headers: event.request.headers,
+                credentials: event.request.credentials,
+            };
+            if (event.request.mode !== 'navigate') {
+                reqInit.mode = event.request.mode;
+            }
+            event.respondWith(fetch(url.toString(), reqInit));
         } else {
-            event.respondWith(handleDecryption(modifiedRequest, event.clientId));
+            event.respondWith(handleDecryption(event.request, event.clientId));
         }
         return;
     }
@@ -185,6 +183,7 @@ async function handleDecryption(request, clientId) {
     // Strip parameters that leak metadata
     urlObj.searchParams.delete('filename');
     urlObj.searchParams.delete('ext');
+    urlObj.searchParams.delete('raw');
     const cleanServerUrl =
         urlObj.origin +
         urlObj.pathname +
@@ -193,8 +192,21 @@ async function handleDecryption(request, clientId) {
     // Validate there is a key
     const activeDecryptionKey = await getKeyForRequest(urlObj);
     if (!activeDecryptionKey) {
-        const fallbackHeaders = authHeader ? { Authorization: authHeader } : {};
-        return fetch(request, { headers: fallbackHeaders });
+        // Safely construct fallback headers to include auth
+        const fallbackHeaders = new Headers(request.headers);
+        if (authHeader) fallbackHeaders.set('Authorization', authHeader);
+
+        const reqInit = {
+            method: request.method,
+            headers: fallbackHeaders,
+            credentials: request.credentials,
+        };
+
+        if (request.mode !== 'navigate') {
+            reqInit.mode = request.mode;
+        }
+
+        return fetch(cleanServerUrl, reqInit);
     }
 
     // Get the IV and dimensions
