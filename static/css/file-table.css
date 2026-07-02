@@ -1,5 +1,6 @@
 .file-table {
     height: 100%;
+    overflow-x: auto;
 
     * {
         user-select: none;
@@ -10,6 +11,7 @@
         border-collapse: collapse;
         font-size: small;
         color: var(--fg-subtle);
+        table-layout: fixed;
     }
 
     thead > tr {
@@ -31,9 +33,14 @@
         cursor: pointer;
         font-weight: normal;
 
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+
         &:hover {
             background-color: var(--border-color);
         }
+
         & > img {
             height: 16px;
             vertical-align: middle;
@@ -49,6 +56,11 @@
         margin: 0;
         cursor: pointer;
         vertical-align: middle;
+
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+
         img {
             vertical-align: middle;
             height: 20px;
@@ -73,7 +85,7 @@
         width: 22px;
         height: 22px;
         border-radius: 2px;
-        margin: 0;
+        margin: 0 auto;
 
         background-color: var(--bg-light);
         border: 1px solid var(--fg);
@@ -101,6 +113,21 @@
             &::before {
                 transform: scale(1);
             }
+        }
+    }
+
+    /* --- MOBILE --- */
+    @media (max-width: 768px) {
+        col:nth-child(1) {
+            width: 44px !important;
+        }
+
+        col:nth-child(2) {
+            width: calc(100% - 44px) !important;
+        }
+
+        td {
+            padding: 12px 8px;
         }
     }
 }

@@ -47,3 +47,50 @@
         margin-bottom: 10px;
     }
 }
+
+/* --- MOBILE (actually a bottom bar) --- */
+@media (max-width: 768px) {
+    .sidebar-root {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+
+        width: 100%;
+        height: calc(64px + env(safe-area-inset-bottom));
+        padding-bottom: env(safe-area-inset-bottom);
+        margin-right: 0;
+        flex-direction: row;
+        justify-content: space-evenly;
+        border-top: 1px solid var(--border-color);
+        z-index: 100;
+
+        & > :not(.button, hr) {
+            padding: 0;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        hr {
+            display: none;
+        }
+
+        .button {
+            padding: 0;
+            height: 64px;
+            width: 64px;
+            justify-content: center;
+        }
+
+        .button img,
+        & > :not(.button, hr) img {
+            width: 28px;
+            height: 28px;
+        }
+
+        .sidebar-bottom {
+            margin: 0;
+        }
+    }
+}
