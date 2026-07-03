@@ -31,6 +31,7 @@
     .button {
         border-radius: 0;
         background-color: var(--bg-light);
+        margin-bottom: 8px;
 
         img {
             height: 100%;
@@ -81,6 +82,7 @@
             height: 64px;
             width: 64px;
             justify-content: center;
+            margin-bottom: 0;
         }
 
         .button img,

@@ -1,3 +1,6 @@
+// Global instance of the table
+let filetable_table = null;
+
 // Formatter functions
 function __filetable_formatBytes(bytes) {
     if (bytes === -1 || bytes === '--' || bytes == null) return '--';
@@ -10,6 +13,7 @@ function __filetable_formatBytes(bytes) {
 
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
+
 function __filetable_formatDate(unix_timestamp) {
     if (!unix_timestamp || unix_timestamp == 0) return '--';
 
@@ -521,104 +525,3 @@ async function filetable_goToFolderSearch(hash, keyObj, name, currentHereHash) {
         breadcrumbsToAdd: breadcrumbsToAdd,
     };
 }
-
-// Global instance of the home table
-let filetable_table = null;
-
-// Routing & View Configuration Logic
-function app_initTableConfig(path) {
-    // Clear out the old state entirely
-    if (filetable_table) {
-        filetable_table.clear();
-    }
-
-    const breadcrumbList = document.getElementById('breadcrumb-list');
-    if (breadcrumbList) breadcrumbList.innerHTML = '';
-
-    const actionButtons = document.getElementById('app-action-buttons');
-
-    if (path.startsWith('/home')) {
-        if (actionButtons) actionButtons.style.display = 'flex';
-        filetable_table = new FileTable({
-            tbodyId: 'file-table-body',
-            checkboxHeaderId: 'header-checkbox',
-            nameHeaderId: 'header-name',
-            colgroupId: 'file-colgroup',
-            columnConfig: [
-                { type: 'checkbox', title: '', width: '5%', sortable: false },
-                { type: 'name', title: 'Name', width: '55%', sortable: true },
-                {
-                    type: 'date',
-                    title: 'Date Added',
-                    width: '20%',
-                    sortable: true,
-                    dataKey: 'added',
-                },
-                { type: 'type', title: 'Type', width: '10%', sortable: true },
-                { type: 'size', title: 'Size', width: '10%', sortable: true, dataKey: 'size' },
-            ],
-        });
-    } else if (path.startsWith('/trash')) {
-        if (actionButtons) actionButtons.style.display = 'none';
-        filetable_table = new FileTable({
-            tbodyId: 'file-table-body',
-            checkboxHeaderId: 'header-checkbox',
-            nameHeaderId: 'header-name',
-            colgroupId: 'file-colgroup',
-            columnConfig: [
-                { type: 'checkbox', title: '', width: '5%', sortable: false },
-                { type: 'name', title: 'Name', width: '35%', sortable: true },
-                {
-                    type: 'string',
-                    title: 'Original Path',
-                    width: '40%',
-                    sortable: true,
-                    dataKey: 'path',
-                },
-                {
-                    type: 'date',
-                    title: 'Date Deleted',
-                    width: '20%',
-                    sortable: true,
-                    dataKey: 'deleted',
-                },
-            ],
-        });
-    }
-
-    // Re-apply the global header listener from the original script
-    const checkbox_header = document.querySelector('.checkbox-header');
-    if (checkbox_header) {
-        checkbox_header.addEventListener('change', function () {
-            const current_rows = document.querySelectorAll('.checkbox-row');
-            current_rows.forEach((checkbox) => (checkbox.checked = checkbox_header.checked));
-        });
-    }
-}
-
-function app_navigateTo(view) {
-    const targetPath = '/' + view;
-    // Don't re-render if already at the target
-    if (window.location.pathname === targetPath) return;
-
-    // Update the browser URL
-    window.history.pushState({}, '', targetPath);
-
-    // Re-initialize the table
-    app_initTableConfig(targetPath);
-
-    // Broadcast to the rest of the application that the view changed
-    window.dispatchEvent(new CustomEvent('viewChanged', { detail: { view: view } }));
-}
-
-// Handle the user clicking the physical "Back" / "Forward" buttons in their browser
-window.addEventListener('popstate', () => {
-    app_initTableConfig(window.location.pathname);
-    const currentView = window.location.pathname.substring(1);
-    window.dispatchEvent(new CustomEvent('viewChanged', { detail: { view: currentView } }));
-});
-
-// Initial boot
-document.addEventListener('DOMContentLoaded', () => {
-    app_initTableConfig(window.location.pathname);
-});

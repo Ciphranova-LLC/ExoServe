@@ -16,15 +16,18 @@
         <link href="{{ url_for('static', filename='css/sidebar.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/toast.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/loading.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/settings.css') }}" rel="stylesheet" />
 
         <script src="{{ url_for('static', filename='js/network.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/breadcrumbs.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/carousel.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
         <script src="{{ url_for('static', filename='js/e2ee.js') }}"></script>
         <script src="{{ url_for('static', filename='js/filetable.js') }}"></script>
         <script src="{{ url_for('static', filename='js/key-handler.js') }}"></script>
         <script src="{{ url_for('static', filename='js/search.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/ui.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
     </head>
 
     <body>
@@ -44,6 +47,10 @@
 
                 <div class="button" onclick="app_navigateTo('trash')" title="Trash">
                     <img src="static/img/trashcan.svg" />
+                </div>
+
+                <div class="button" onclick="app_navigateTo('settings')" title="Settings">
+                    <img src="static/img/settings.svg" />
                 </div>
 
                 <div class="button sidebar-bottom" onclick="ui_signOut()" title="Sign Out">
@@ -92,7 +99,7 @@
                 </div>
 
                 <div class="area-files">
-                    <div class="file-table">
+                    <div class="file-table" id="file-table-container">
                         <div id="loading-overlay" class="loading-overlay active">
                             <div class="loading-spinner"></div>
                             <div class="loading-text">Loading...</div>
@@ -106,6 +113,8 @@
                         </table>
                     </div>
                 </div>
+
+                {%include "settings.html" %}
             </main>
         </div>
 

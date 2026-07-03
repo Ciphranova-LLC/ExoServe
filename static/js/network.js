@@ -86,6 +86,42 @@ async function network_nodePost(payload, detailsObj, treeType = 'home') {
     });
 }
 
+async function network_settingsGet(uuid, auth) {
+    return await fetch(`/api/settings/${encodeURIComponent(uuid)}`, {
+        method: 'GET',
+        headers: {
+            Authorization: `Bearer ${auth}`,
+        },
+    });
+}
+
+async function network_settingsPost(uuid, auth, settings) {
+    return await fetch('/api/settings', {
+        method: 'POST',
+        body: JSON.stringify({
+            uuid: uuid,
+            settings: settings,
+        }),
+        headers: {
+            Authorization: `Bearer ${auth}`,
+            'Content-Type': 'application/json',
+        },
+    });
+}
+
+async function network_accountDelete(uuid, auth) {
+    const path = `/account/${encodeURIComponent(uuid)}`;
+    const res = await fetch(path, {
+        method: 'DELETE',
+        headers: {
+            Authorization: `Bearer ${auth}`,
+        },
+    });
+    if (res.ok) {
+        window.location.href = '/login';
+    }
+}
+
 async function network_register(uuid, salt, pubKey, privKey, iv) {
     return await fetch('/register', {
         method: 'POST',

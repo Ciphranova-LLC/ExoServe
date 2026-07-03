@@ -42,7 +42,10 @@ function ui_initContextMenu() {
         if (isHomePage) {
             // Home page: Show "Delete" option
             deleteItem.innerHTML = '<img src="static/img/trashcan.svg" /> Move to Trash';
-            deleteItem.setAttribute('onclick', "ui_showYesNoModal('Move to trash: ', 'ui_submitDelete()')");
+            deleteItem.setAttribute(
+                'onclick',
+                "ui_showYesNoModal('Move to trash: ', 'ui_submitDelete()')"
+            );
 
             // Hide restore button on Home view
             if (restoreItem) restoreItem.style.display = 'none';
@@ -132,8 +135,11 @@ function ui_submitNewFolderModal() {
 
 function ui_showYesNoModal(question, callbackStr) {
     const dialog = document.getElementById('modal-yesno');
-    document.getElementById('yesno-question').innerHTML =
-        question + escapeHtml(activeContextNode.name) + '?';
+    document.getElementById('yesno-question').innerHTML = question;
+    if (activeContextNode) {
+        document.getElementById('yesno-question').innerHTML +=
+            escapeHtml(activeContextNode.name) + '?';
+    }
     const confirmBtn = document.getElementById('btn-yesno-confirm');
     if (confirmBtn && callbackStr) {
         confirmBtn.setAttribute('onclick', callbackStr);

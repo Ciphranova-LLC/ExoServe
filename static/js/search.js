@@ -7,7 +7,7 @@ let search_blank = false;
 
 // Recursively perform a depth-first search
 async function __search_search(here, children, term) {
-    const MAX_CONCURRENT = 4;
+    const MAX_CONCURRENT = settings_db['search_workers'];
     let running = 0;
     const queue = [];
     const hits = {};

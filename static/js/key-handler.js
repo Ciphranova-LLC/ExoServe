@@ -274,7 +274,9 @@ async function keyhandler_check() {
     }
 
     // Session is valid, load the applicable root directory
-    return await keyhandler_loadRoot();
+    if (window.location.pathname != '/settings') {
+        return await keyhandler_loadRoot();
+    }
 }
 
 // Try to load the service worker before checking for session data
@@ -288,5 +290,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Listen for view changes to swap between home and trash
 window.addEventListener('viewChanged', async (e) => {
-    await keyhandler_loadRoot();
+    if (e.detail.view != 'settings') {
+        await keyhandler_loadRoot();
+    }
 });

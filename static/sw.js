@@ -1,10 +1,10 @@
-// Key in use
+// Global state trackers
 const ivCache = new Map();
 const tokenMap = new Map();
 
-// Constants
-const CHUNK_P_SIZE = 5 * 1024 * 1024; // 5MB Plaintext Chunk
-const CHUNK_E_SIZE = CHUNK_P_SIZE + 16; // Plaintext Chunk + 16-byte Auth Tag
+// Initialize chunk sizes just in case something goes wrong
+let CHUNK_P_SIZE = 5 * 1024 * 1024; // 5 MB Plaintext Chunk
+let CHUNK_E_SIZE = CHUNK_P_SIZE + 16; // Plaintext Chunk + 16-byte Auth Tag
 
 // Helper to pull the CryptoKey object out of IndexedDB
 const keyDB = {
@@ -34,10 +34,13 @@ self.addEventListener('fetch', (event) => {
     if (url.pathname === '/arm-worker' && event.request.method === 'POST') {
         event.respondWith(
             (async () => {
+                let data;
                 try {
-                    const data = await event.request.json();
-                    if (data.hash && data.authToken) {
+                    data = await event.request.json();
+                    if (data.hash && data.authToken && data.settings) {
                         tokenMap.set(data.hash, `Bearer ${data.authToken}`);
+                        CHUNK_P_SIZE = data.settings.chunk_size * 1024 * 1024;
+                        CHUNK_E_SIZE = CHUNK_P_SIZE + 16;
                         return new Response(JSON.stringify({ success: true }), {
                             status: 200,
                             headers: { 'Content-Type': 'application/json' },
@@ -45,7 +48,7 @@ self.addEventListener('fetch', (event) => {
                     }
                     return new Response('Missing hash or token', { status: 400 });
                 } catch (e) {
-                    return new Response('Invalid JSON payload', { status: 400 });
+                    return new Response(e, { status: 400 });
                 }
             })()
         );

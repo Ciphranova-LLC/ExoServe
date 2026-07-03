@@ -61,11 +61,17 @@
     height: auto;
 }
 
-/* Title */
+/* Titles */
 .login-title {
     text-align: center;
     margin: 0;
     font-size: 38px;
+}
+
+.login-subtitle {
+    text-align: center;
+    margin: 0;
+    font-size: 24px;
 }
 
 /* Labels */

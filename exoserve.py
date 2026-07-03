@@ -20,7 +20,7 @@ from secrets import token_bytes
 from time import time, sleep
 from uuid import UUID
 
-from src.filesystem import ExoDatabase, delete_file, new_file, unstage_file
+from src.filesystem import ExoDatabase, delete_file, new_file, unstage_file, USER_SETTINGS_SCHEMA, SERVER_SETTINGS_DEFAULTS
 from src.uploadstate import load_upload_state, save_upload_state
 
 
@@ -56,22 +56,39 @@ def serve_index():
 def serve_home():
     return render_template('app.html')
 
+
 @app.route('/trash')
 def serve_trash():
     return render_template('app.html')
 
+
+@app.route('/settings')
+def serve_settings():
+    return render_template('app.html')
+
+
 @app.route('/login')
 def serve_login():
-    return render_template('login.html')
+    settings = EXO_DATABASE.get_server_settings()
+    return render_template('login.html', allow_registration=settings['allow_registration'])
 
 
 @app.route('/signup')
 def serve_signup():
-    return render_template('signup.html')
+    settings = EXO_DATABASE.get_server_settings()
+    if settings['allow_registration']:
+        return render_template('signup.html')
+    else:
+        return render_template('lockdown.html')
 
 
 @app.route('/register', methods=['POST'])
 def serve_register():
+    # Validate that registration is allowed
+    settings = EXO_DATABASE.get_server_settings()
+    if not settings['allow_registration']:
+        return '', 400
+
     # Pull the user information from the body
     data = request.get_json()
     uuid = data.get('uuid')
@@ -334,7 +351,6 @@ def route_post_node():
     else:
         # Uploading a whole file
         if 'checksum' not in details:
-            print('Missing checksum')
             return 'Missing checksum', 400
 
         final_checksum = details['checksum']
@@ -388,6 +404,77 @@ def route_delete_node(uuid, checksum):
     return '', 204
 
 
+@app.route('/api/settings/<uuid>', methods=['GET'])
+def route_get_settings(uuid):
+    # Extract the auth token from the header
+    auth_header = request.headers.get('Authorization')
+    auth_token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        auth_token = auth_header[7:]
+
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth_token):
+        return 'Unauthorized', 440
+
+    settings = EXO_DATABASE.get_user_settings(uuid) \
+             | EXO_DATABASE.get_server_settings()
+
+    return jsonify(settings), 200
+
+
+@app.route('/api/settings', methods=['POST'])
+def route_post_settings():
+    # Parse the incoming JSON request
+    data = request.get_json()
+    if not data:
+        return 'Bad Request', 400
+    uuid = data.get('uuid')
+
+    # Extract the auth token from the header
+    auth_header = request.headers.get('Authorization')
+    auth_token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        auth_token = auth_header[7:]
+
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth_token):
+        return 'Unauthorized', 440
+
+    # Filter the incoming data using the keys from your schema
+    settings = data.get('settings')
+    user_updates = {k: v for k, v in settings.items() if k in USER_SETTINGS_SCHEMA.keys()}
+    server_updates = {k: v for k, v in settings.items() if k in SERVER_SETTINGS_DEFAULTS.keys()}
+
+    # Apply user settings
+    if user_updates:
+        EXO_DATABASE.update_user_settings(uuid, **user_updates)
+
+    # Apply global server settings
+    if server_updates:
+        for key, value in server_updates.items():
+            EXO_DATABASE.update_server_setting(key, value)
+
+    return jsonify({'status': 'success'}), 200
+
+
+@app.route('/account/<uuid>', methods=['DELETE'])
+def route_delete_account(uuid):
+    # Extract the auth token from the header
+    auth_header = request.headers.get('Authorization')
+    auth_token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        auth_token = auth_header[7:]
+
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth_token):
+        return 'Unauthorized', 440
+    sandbox = UPLOAD_FOLDER / uuid
+
+    # Perform deletion
+    EXO_DATABASE.delete_user(uuid, sandbox)
+    return '', 200
+
+
 def generate_dummy_user_row(uuid):
     # Use a thread-safe PRNG engine
     seed = hmac.new(
@@ -414,6 +501,7 @@ def generate_dummy_user_row(uuid):
         'iv': b64encode(expand(seed, 12)).decode('utf-8'),
         'nonce': b64encode(expand(seed, 32)).decode('utf-8'),
     }
+
 
 # Start the HTTP development server
 def run_http():

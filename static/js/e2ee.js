@@ -296,6 +296,7 @@ async function e2ee_armWorker(keyObj, hash, auth) {
             body: JSON.stringify({
                 hash: hash,
                 authToken: auth,
+                settings: settings_db,
             }),
         });
 
@@ -373,7 +374,7 @@ async function e2ee_downloadFile(hash, keyObj, filename) {
 // Encrypt and upload a file in 5MB chunks
 async function e2ee_uploadFileChunked(file, createToast = true) {
     // Ease-of-use constants
-    const CHUNK_SIZE = 5 * 1024 * 1024;
+    const CHUNK_SIZE = settings_db['chunk_size'] * 1024 * 1024;
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
     // Generate a random encryption key

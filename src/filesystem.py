@@ -1,9 +1,25 @@
 import sqlite3
+import shutil
 from contextlib import contextmanager
 from pathlib import Path
 from secrets import token_bytes
 from time import time
 
+# Define user settings
+USER_SETTINGS_SCHEMA = {
+    'chunk_size': ('INTEGER', 5),
+    'trash_days': ('INTEGER', 30)
+}
+
+# Define server settings
+SERVER_SETTINGS_DEFAULTS = {
+    'session_ttl': '3600',
+    'lock_ttl': '60',
+    'nonce_ttl': '300',
+    'search_workers': '4',
+    'allow_registration': '1',
+    'enable_audit_logs': '0'
+}
 
 class ExoDatabase:
     @contextmanager
@@ -63,6 +79,35 @@ class ExoDatabase:
                     expires   INTEGER NOT NULL
                 )
             ''')
+
+            # Dynamically build the user_settings columns
+            user_columns_sql = ",\n                    ".join(
+                f"{col} {dtype} DEFAULT {default}"
+                for col, (dtype, default) in USER_SETTINGS_SCHEMA.items()
+            )
+
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS user_settings (
+                    uuid TEXT PRIMARY KEY,
+                    {user_columns_sql},
+                    FOREIGN KEY (uuid) REFERENCES users(uuid)
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS server_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            ''')
+            cursor.execute('SELECT COUNT(*) FROM server_settings')
+            if cursor.fetchone()[0] == 0:
+                default_settings = [
+                    (k, v) for k, v in SERVER_SETTINGS_DEFAULTS.items()
+                ]
+                cursor.executemany('''
+                    INSERT INTO server_settings (key, value)
+                    VALUES (?, ?)
+                ''', default_settings)
         self.conn.commit()
 
     def _uuid_exists(self, uuid):
@@ -87,7 +132,33 @@ class ExoDatabase:
                 INSERT INTO roots (uuid, home, trash)
                 VALUES (?, NULL, NULL)
             ''', (uuid,))
+
+            # Create default user settings
+            cursor.execute('''
+                INSERT INTO user_settings (uuid)
+                VALUES (?)
+            ''', (uuid,))
         self.conn.commit()
+        return True
+
+    def delete_user(self, uuid, sandbox: Path):
+        # Check if the user actually exists
+        if not self._uuid_exists(uuid):
+            return False
+
+        # Delete from all database tables
+        with self.get_cursor() as cursor:
+            cursor.execute('DELETE FROM user_settings WHERE uuid = ?', (uuid,))
+            cursor.execute('DELETE FROM locks WHERE uuid = ?', (uuid,))
+            cursor.execute('DELETE FROM sessions WHERE uuid = ?', (uuid,))
+            cursor.execute('DELETE FROM roots WHERE uuid = ?', (uuid,))
+            cursor.execute('DELETE FROM users WHERE uuid = ?', (uuid,))
+        self.conn.commit()
+
+        # Delete the user's folder on the server
+        if sandbox.exists() and sandbox.is_dir():
+            shutil.rmtree(sandbox)
+
         return True
 
     def get_key_material(self, uuid):
@@ -110,6 +181,67 @@ class ExoDatabase:
                 'iv': row[4]
             }
         return None
+
+    def get_user_settings(self, uuid):
+        # Get the user settings
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                SELECT chunk_size, trash_days
+                FROM user_settings
+                WHERE uuid = ?
+            ''', (uuid,))
+            row = cursor.fetchone()
+
+        # Return in a way that is easy to use
+        if row:
+            return {
+                'chunk_size': row[0],
+                'trash_days': row[1]
+            }
+        return None
+
+    def update_user_settings(self, uuid, **kwargs):
+        updates = {k: v for k, v in kwargs.items() if k in USER_SETTINGS_SCHEMA.keys()}
+        if not updates:
+            return False
+
+        set_clause = ', '.join([f"{k} = ?" for k in updates.keys()])
+        values = list(updates.values())
+        values.append(uuid)
+
+        with self.get_cursor() as cursor:
+            cursor.execute(f'''
+                UPDATE user_settings
+                SET {set_clause}
+                WHERE uuid = ?
+            ''', tuple(values))
+        self.conn.commit()
+        return True
+
+    def get_server_settings(self):
+        with self.get_cursor() as cursor:
+            cursor.execute('SELECT key, value FROM server_settings')
+            rows = cursor.fetchall()
+        settings = {}
+        for key, value in rows:
+            if value.isdigit():
+                settings[key] = int(value)
+            elif value.lower() in ('true', 'false'):
+                settings[key] = value.lower() == 'true'
+            else:
+                settings[key] = value
+        return settings
+
+    def update_server_setting(self, key, value):
+        str_value = str(value).lower() if isinstance(value, bool) else str(value)
+
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                INSERT OR REPLACE INTO server_settings (key, value)
+                VALUES (?, ?)
+            ''', (key, str_value))
+        self.conn.commit()
+        return True
 
     def generate_auth_token(self, uuid):
         # Generate token and metadata
@@ -138,6 +270,9 @@ class ExoDatabase:
         self.conn.commit()
 
     def consume_nonce(self, nonce_hash):
+        # Get the settings for the nonce TTL
+        settings = self.get_server_settings()
+
         with self.get_cursor() as cursor:
             # Query for the nonce
             cursor.execute('''
@@ -158,11 +293,14 @@ class ExoDatabase:
         # Validate the nonce
         created_at = row[0]
         current_time = int(time())
-        if current_time - created_at > 300:
+        if current_time - created_at > settings['nonce_ttl']:
             return False
         return True
 
     def check_token(self, uuid, token):
+        # Get the settings for the session TTL
+        settings = self.get_server_settings()
+
         with self.get_cursor() as cursor:
             # Query for the session
             cursor.execute('''
@@ -188,7 +326,7 @@ class ExoDatabase:
 
             # If the token is valid , refresh it
             else:
-                new_expires = current_time + 3600
+                new_expires = current_time + settings['session_ttl']
                 cursor.execute('''
                     UPDATE sessions
                     SET expires = ?
@@ -239,8 +377,9 @@ class ExoDatabase:
         return True
 
     def acquire_lock(self, uuid, key):
+        settings = self.get_server_settings()
         current_time = int(time())
-        lock_expires = current_time + 60
+        lock_expires = current_time + settings['lock_ttl']
 
         with self.get_cursor() as cursor:
             # Check if lock exists for the uuid
@@ -311,16 +450,6 @@ def new_file(sandbox: Path, name: str, data: bytes):
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open('wb') as f:
         f.write(data)
-
-
-# """
-# Get the contents of a file
-# """
-# def read_file(sandbox: Path, name: str):
-#     target = sandbox / name[0:2] / name[2:4] / name
-#     with target.open('rb') as f:
-#         data = f.read()
-#     return data
 
 
 """

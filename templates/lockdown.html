@@ -30,28 +30,12 @@
             <div class="login-wrapper">
                 <div class="login-box">
                     <img src="static/img/logo.svg" alt="Logo" class="login-logo" />
-                    <h1 class="login-title">Log in</h1>
-
-                    <label class="login-label" for="username">Username</label>
-                    <input type="text" id="username" class="login-input" placeholder="" />
-
-                    <label class="login-label" for="password">Password</label>
-                    <input type="password" id="password" class="login-input" placeholder="" />
-
-                    <button class="login-button" onclick="login_login()">Log in</button>
-
-                    {% if allow_registration %}
+                    <h3 class="login-subtitle">
+                        Registeration of new user accounts has been disabled by the server
+                        administrator
+                    </h3>
                     <div class="login-signup">
-                        Need an account? <a href="/signup">Sign up now</a>
-                    </div>
-                    {% endif %}
-
-                    <div
-                        class="login-signup"
-                        id="status"
-                        style="align-self: center; margin-top: 24px"
-                    >
-                        placeholder
+                        <a href="/login">Go back to log in</a>
                     </div>
                 </div>
             </div>

@@ -1,0 +1,137 @@
+<div id="settings-container" class="settings-container" style="display: none">
+    <h1>Settings</h1>
+
+    <h2>Account Configuration</h2>
+    <h3>Update Password</h3>
+    <div class="setting-item setting-password">
+        <label>Current Password</label>
+        <input type="password" id="current_password" />
+    </div>
+    <div class="setting-item setting-password">
+        <label>New Password</label>
+        <input type="password" id="new_password" />
+    </div>
+    <div class="setting-item setting-password">
+        <label>Confirm New Password</label>
+        <input type="password" id="confirm_password" />
+    </div>
+    <div class="button" id="change_password_btn" title="Change Password">Change Password</div>
+    <h3>Delete Account</h3>
+    <div class="setting-item">
+        <div class="button button-danger" id="delete_account_btn" title="Delete Account">
+            Delete Account
+        </div>
+    </div>
+
+    <h2>System Configuration</h2>
+    <h3>Account Registration</h3>
+    <div class="setting-item">
+        <label
+            ><input type="checkbox" data-setting="allow_registration" />Allow new users to
+            register.</label
+        >
+        <p>Allows for new user accounts to be created from the login screen.</p>
+    </div>
+    <h3>Audit Logging</h3>
+    <div class="setting-item">
+        <label
+            ><input type="checkbox" data-setting="enable_audit_logs" />Enable server-side audit
+            logs.</label
+        >
+        <p>
+            Enables audit logs to be generated on the server to track general user activity (files
+            and folders remain end-to-end encrypted).
+        </p>
+    </div>
+    <h3>Software License Status</h3>
+    <div class="setting-item">
+        <label>Demo build</label>
+        <p>The software license can be installed on the server.</p>
+    </div>
+
+    <h2>Cryptographic Configuration</h2>
+    <h3>Encryption Algorithm</h3>
+    <div class="setting-item">
+        <label>AES-256-GCM</label>
+        <p>Used to encrypt a file before uploading it to the server.</p>
+    </div>
+    <h3>Key Generation Algorithm</h3>
+    <div class="setting-item">
+        <label>PBKDF2</label>
+        <p>Used to authenticate a user during log in.</p>
+    </div>
+    <h3>Hash Algorithm</h3>
+    <div class="setting-item">
+        <label>SHA-256 (600,000 iterations)</label>
+        <p>Used to index files and validate integrity over the network.</p>
+    </div>
+
+    <h2>Security and Authentication</h2>
+    <h3>Session TTL</h3>
+    <div class="setting-item">
+        <div class="number-input" data-setting="session_ttl">
+            <button class="decrease">&minus;</button>
+            <input type="text" value="" />
+            <button class="increase">+</button>
+        </div>
+        <p>Maximum time in seconds that an inactive login session is valid.</p>
+    </div>
+    <h3>File System Lock TTL</h3>
+    <div class="setting-item">
+        <div class="number-input" data-setting="lock_ttl">
+            <button class="decrease">&minus;</button>
+            <input type="text" value="" />
+            <button class="increase">+</button>
+        </div>
+        <p>Maximum time in seconds that a lock on the file system is valid.</p>
+    </div>
+    <h3>Nonce TTL</h3>
+    <div class="setting-item">
+        <div class="number-input" data-setting="nonce_ttl">
+            <button class="decrease">&minus;</button>
+            <input type="text" value="" />
+            <button class="increase">+</button>
+        </div>
+        <p>
+            Maximum time in seconds that a login challenge from the server is valid. Note that
+            challenges are immediately invalidated once completed.
+        </p>
+    </div>
+
+    <h2>Storage and Performance</h2>
+    <h3>Concurrent Search Workers</h3>
+    <div class="setting-item">
+        <div class="number-input" data-setting="search_workers">
+            <button class="decrease">&minus;</button>
+            <input type="text" value="" />
+            <button class="increase">+</button>
+        </div>
+        <p>
+            Maximum number of concurrent network connections during a search job. A higher number
+            has the potential to search more quickly, but requires more network bandwidth.
+        </p>
+    </div>
+    <h3>File Chunk Size</h3>
+    <div class="setting-item">
+        <div class="number-input" data-setting="chunk_size">
+            <button class="decrease">&minus;</button>
+            <input type="text" value="" />
+            <button class="increase">+</button>
+        </div>
+        <p>Size of chunks in MB when streaming file uploads and downloads.</p>
+    </div>
+    <h3>Trashed Files</h3>
+    <div class="setting-item">
+        <div class="number-input" data-setting="trash_days">
+            <button class="decrease">&minus;</button>
+            <input type="text" value="" />
+            <button class="increase">+</button>
+        </div>
+        <p>
+            Maximum number of days that files will stay in trash before being permanently deleted
+            automatically.
+        </p>
+    </div>
+
+    <div class="button button-wide" id="save_settings_btn" title="Save Changes">Save Changes</div>
+</div>
