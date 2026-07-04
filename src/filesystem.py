@@ -156,9 +156,25 @@ class ExoDatabase:
         self.conn.commit()
 
         # Delete the user's folder on the server
+        # TODO: Spin this up on another thread so that it isn't blocking
         if sandbox.exists() and sandbox.is_dir():
             shutil.rmtree(sandbox)
 
+        return True
+
+    def update_user(self, uuid, privkey):
+        # Check if the user actually exists
+        if not self._uuid_exists(uuid):
+            return False
+
+        # Update the private key
+        with self.get_cursor() as cursor:
+            cursor.execute('''
+                UPDATE users
+                SET privkey = ?
+                WHERE uuid = ?
+            ''', (privkey, uuid))
+        self.conn.commit()
         return True
 
     def get_key_material(self, uuid):

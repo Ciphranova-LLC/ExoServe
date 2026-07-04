@@ -1,10 +1,7 @@
 async function network_authChallenge(uuid) {
-    return await fetch('/auth/challenge', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            uuid: uuid,
-        }),
+    const path = `/auth/challenge/${encodeURIComponent(uuid)}`;
+    return await fetch(path, {
+        method: 'GET',
     });
 }
 
@@ -17,6 +14,40 @@ async function network_authSubmit(uuid, nonce, signature) {
             nonce: nonce,
             signature: btoa(String.fromCharCode(...new Uint8Array(signature))),
         }),
+    });
+}
+
+async function network_authCheck(uuid, nonce, signature) {
+    return await fetch('/auth/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            uuid: uuid,
+            nonce: nonce,
+            signature: btoa(String.fromCharCode(...new Uint8Array(signature))),
+        }),
+    });
+}
+
+async function network_authKeyMaterial(uuid) {
+    const path = `/auth/material/${encodeURIComponent(uuid)}`;
+    return await fetch(path, {
+        method: 'GET',
+    });
+}
+
+async function network_authUpdate(uuid, auth, privKey) {
+    return await fetch('/auth/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            uuid: uuid,
+            private_key: btoa(String.fromCharCode(...new Uint8Array(privKey))),
+        }),
+        headers: {
+            Authorization: `Bearer ${auth}`,
+            'Content-Type': 'application/json',
+        },
     });
 }
 

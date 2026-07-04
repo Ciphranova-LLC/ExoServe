@@ -281,30 +281,20 @@ function __e2ee_buildPathFromCrumbs(crumbs) {
     return here;
 }
 
-// Arm the service worker with a key
+// Arm the service worker with a key and auth context
 async function e2ee_armWorker(keyObj, hash, auth) {
-    // Store the key in IndexedDB
-    await keyDB.setActiveKey(keyObj, hash);
+    // Package all required context into a single object for the Service Worker
+    const fileContext = {
+        key: keyObj,
+        auth: auth,
+        chunkSize: settings_db.chunk_size,
+    };
 
-    // Send the token to the Service Worker's memory
+    // Store the context in IndexedDB
     try {
-        const res = await fetch('/arm-worker', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                hash: hash,
-                authToken: auth,
-                settings: settings_db,
-            }),
-        });
-
-        if (!res.ok) {
-            console.error('Failed to arm worker with auth token');
-        }
+        await keyDB.setActiveKey(fileContext, hash);
     } catch (e) {
-        console.error('Network error arming worker:', e);
+        console.error('Failed to arm worker context in IDB:', e);
     }
 }
 

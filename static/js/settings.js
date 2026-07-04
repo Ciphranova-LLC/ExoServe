@@ -154,22 +154,37 @@ async function settings_save() {
     }
 }
 
-function settings_changePassword() {
-    const currentPassword = document.getElementById('current_password').value;
-    const newPassword = document.getElementById('new_password').value;
-    const confirmPassword = document.getElementById('confirm_password').value;
+async function settings_changePassword() {
+    const currentPasswordElem = document.getElementById('current_password');
+    const newPasswordElem = document.getElementById('new_password');
+    const confirmPasswordElem = document.getElementById('confirm_password');
 
-    // Validate
+    const currentPassword = currentPasswordElem.value;
+    const newPassword = newPasswordElem.value;
+    const confirmPassword = confirmPasswordElem.value;
+
+    // Validate inputs are present
     if (!currentPassword || !newPassword || !confirmPassword) {
         ui_showToast('All password fields are required.');
         return;
     }
 
+    // Validate new password was not fat fingered
     if (newPassword !== confirmPassword) {
         ui_showToast('New passwords do not match.');
         return;
     }
-    ui_showToast('Password change not currently supported');
+
+    // Pass workflow to keyhandler
+    const status = await keyhandler_changePassword(currentPassword, newPassword);
+    if (!status.changed) {
+        ui_showToast(`Failed to updated password: ${status.reason}`);
+    } else {
+        ui_showToast('Password updated successfully');
+        currentPasswordElem.value = '';
+        newPasswordElem.value = '';
+        confirmPasswordElem.value = '';
+    }
 }
 
 function settings_deleteAccount() {

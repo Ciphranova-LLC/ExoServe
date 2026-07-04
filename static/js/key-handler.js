@@ -65,6 +65,59 @@ const keyDB = {
     },
 };
 
+async function __keyHandler_checkPassword(uuid, password, applyPassword = true) {
+    // Request a challenge from the server
+    let res = await network_authChallenge(uuid);
+
+    // It's possible the server encounters some issue
+    // But it should always return key material, even if the UUID doesn't exist
+    if (res.status != 200) return null;
+    let data = await res.json();
+
+    // Helper to decode base64 to Uint8Array
+    const b64toUint8 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+
+    try {
+        // Decode key material data
+        const salt = b64toUint8(data['salt']);
+        const iv = b64toUint8(data['iv']);
+        const encPrivKey = b64toUint8(data['privkey']);
+        const nonce = b64toUint8(data['nonce']);
+
+        // Derive and store the master key
+        const master = await keyhandler_deriveKey(password, salt);
+        if (applyPassword) keyDB.setMasterKey(master, uuid);
+
+        // Decrypt the private key
+        const privKeyRaw = await window.crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: iv },
+            master,
+            encPrivKey
+        );
+
+        // Import private key
+        const keyPair = await window.crypto.subtle.importKey(
+            'pkcs8',
+            privKeyRaw,
+            { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+            false,
+            ['sign']
+        );
+
+        // Sign the nonce
+        const signature = await window.crypto.subtle.sign('RSASSA-PKCS1-v1_5', keyPair, nonce);
+
+        // Submit or check the signed nonce
+        if (applyPassword) {
+            return await network_authSubmit(uuid, data['nonce'], signature);
+        } else {
+            return await network_authCheck(uuid, data['nonce'], signature);
+        }
+    } catch (e) {
+        return null;
+    }
+}
+
 async function keyhandler_generateUuidv8(seed) {
     const encoder = new TextEncoder();
     const data = encoder.encode(seed);
@@ -153,52 +206,113 @@ async function keyhandler_login(username, password) {
     // Generate a deterministic UUID from the username
     const uuid = await keyhandler_generateUuidv8(username);
 
-    // Request a challenge from the server
-    let res = await network_authChallenge(uuid);
+    // Check the password, applying it to log in if it is correct
+    return await __keyHandler_checkPassword(uuid, password, true);
+}
 
-    // It's possible the server encounters some issue
-    // But it should always return key material, even if the UUID doesn't exist
-    if (res.status != 200) return null;
-    let data = await res.json();
+async function keyhandler_changePassword(oldPassword, newPassword) {
+    // Extract the data from Session Storage
+    const uuid = sessionStorage.getItem('uuid');
+    const auth = sessionStorage.getItem('auth_token');
 
-    // Helper to decode base64 to Uint8Array
-    const b64toUint8 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+    // Check the old password without overwriting the current master key
+    const checkRes = await __keyHandler_checkPassword(uuid, oldPassword, false);
+    if (checkRes === null || !checkRes.ok) {
+        return { changed: false, reason: 'Current password is incorrect' };
+    }
+
+    // Get the old master key from storage
+    const masterOld = await e2ee_parseKey(KeyType.ROOT);
+
+    // A tree lock is required since the root nodes will be updated
+    await treeLock.acquire();
 
     try {
-        // Decode key material data
-        const salt = b64toUint8(data['salt']);
-        const iv = b64toUint8(data['iv']);
-        const encPrivKey = b64toUint8(data['privkey']);
-        const nonce = b64toUint8(data['nonce']);
+        // Get the home root node
+        const homeHashRootRes = await network_nodeGet(uuid, auth, 'root', true, 'home');
+        const homeHashRoot = (await homeHashRootRes.json()).root;
+        const homeRoot = await e2ee_fetchFolder(homeHashRoot, masterOld, 'home');
 
-        // Derive and store the master key
-        const master = await keyhandler_deriveKey(password, salt);
-        keyDB.setMasterKey(master, uuid);
+        // Get the trash root node
+        const trashHashRootRes = await network_nodeGet(uuid, auth, 'root', true, 'trash');
+        const trashHashRoot = (await trashHashRootRes.json()).root;
+        const trashRoot = await e2ee_fetchFolder(trashHashRoot, masterOld, 'trash');
 
-        // Decrypt the private key
+        // Get the key material from the server
+        const b64toUint8 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+        const materialRes = await network_authKeyMaterial(uuid);
+        const material = await materialRes.json();
+        const salt = b64toUint8(material['salt']);
+        const iv = b64toUint8(material['iv']);
+        const privKeyOld = b64toUint8(material['privkey']);
+
+        // Decrypt the private key with the old password
         const privKeyRaw = await window.crypto.subtle.decrypt(
             { name: 'AES-GCM', iv: iv },
-            master,
-            encPrivKey
+            masterOld,
+            privKeyOld
         );
 
-        // Import private Key
-        const keyPair = await window.crypto.subtle.importKey(
-            'pkcs8',
-            privKeyRaw,
-            { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-            false,
-            ['sign']
+        // Update the master key
+        const masterNew = await keyhandler_deriveKey(newPassword, salt);
+        keyDB.setMasterKey(masterNew, uuid);
+        e2ee_armWorker(masterNew, 'root', auth);
+
+        // Re-encrypt the private key with the new master key
+        const privKeyNew = await window.crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: iv },
+            masterNew,
+            privKeyRaw
         );
 
-        // Sign the nonce
-        const signature = await window.crypto.subtle.sign('RSASSA-PKCS1-v1_5', keyPair, nonce);
+        // Submit the new private key
+        const updateRes = await network_authUpdate(uuid, auth, privKeyNew);
+        if (!updateRes.ok) {
+            return { changed: false, reason: 'Failed to submit new password' };
+        }
 
-        // Submit the signed nonce
-        return await network_authSubmit(uuid, data['nonce'], signature);
-    } catch (e) {
-        return null;
+        // Re-encrypt and submit the home root
+        const homeString = JSON.stringify(homeRoot);
+        const homeEnc = await e2ee_encryptWhole(homeString, masterNew);
+        const homePostRes = await network_nodePost(
+            homeEnc['data'],
+            {
+                root: true,
+                checksum: homeEnc['hash'],
+                stale: homeHashRoot,
+                lock_key: treeLock._lockKey,
+                uuid: uuid,
+                auth: auth,
+            },
+            'home'
+        );
+        if (!homePostRes.ok) {
+            return { changed: false, reason: 'Failed to update the home root node' };
+        }
+
+        // Re-encrypt and submit the trash root
+        const trashString = JSON.stringify(trashRoot);
+        const trashEnc = await e2ee_encryptWhole(trashString, masterNew);
+        const trashPostRes = await network_nodePost(
+            trashEnc['data'],
+            {
+                root: true,
+                checksum: trashEnc['hash'],
+                stale: homeHashRoot,
+                lock_key: treeLock._lockKey,
+                uuid: uuid,
+                auth: auth,
+            },
+            'trash'
+        );
+        if (!trashPostRes.ok) {
+            return { changed: false, reason: 'Failed to update the trash root node' };
+        }
+    } finally {
+        await treeLock.release();
     }
+
+    return { changed: true };
 }
 
 async function keyhandler_loadRoot() {

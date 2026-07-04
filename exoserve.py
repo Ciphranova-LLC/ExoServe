@@ -20,7 +20,10 @@ from secrets import token_bytes
 from time import time, sleep
 from uuid import UUID
 
-from src.filesystem import ExoDatabase, delete_file, new_file, unstage_file, USER_SETTINGS_SCHEMA, SERVER_SETTINGS_DEFAULTS
+from src.filesystem import (
+    ExoDatabase, delete_file, new_file, unstage_file,
+    USER_SETTINGS_SCHEMA, SERVER_SETTINGS_DEFAULTS
+)
 from src.uploadstate import load_upload_state, save_upload_state
 
 
@@ -40,6 +43,9 @@ EXO_DATABASE = ExoDatabase(HERE / 'users.db')
 # Create the Flask app
 app = Flask(__name__)
 app.secret_key = os.urandom(32)
+
+# SHA-256 hash format
+SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
 
 @app.route('/sw.js')
@@ -108,12 +114,8 @@ def serve_register():
     return '', 200
 
 
-@app.route('/auth/challenge', methods=['POST'])
-def auth_challenge():
-    # Pull the user information from the body
-    data = request.get_json()
-    uuid = data.get('uuid')
-
+@app.route('/auth/challenge/<uuid>', methods=['GET'])
+def auth_challenge(uuid):
     # Get the user data from the database
     user_row = EXO_DATABASE.get_key_material(uuid)
 
@@ -143,52 +145,78 @@ def auth_submit():
     nonce = data.get('nonce')
     signature = data.get('signature')
 
-    # Validate the nonce has not expired
-    nonce = b64decode(nonce)
-    nonce_hash = hashlib.sha256(nonce).hexdigest()
-    if not EXO_DATABASE.consume_nonce(nonce_hash):
-        return '', 400
+    # Validate the signature
+    if not validate_auth(uuid, nonce, signature):
+        return f'', 400
 
-    # Get the user from the database
+    # Generate an auth token for the session
+    token = EXO_DATABASE.generate_auth_token(uuid)
+
+    # Create the sandbox directory tree
+    sandbox = UPLOAD_FOLDER / uuid
+    sandbox.mkdir(parents=False, exist_ok=True)
+    staging = sandbox / 'staging'
+    staging.mkdir(parents=False, exist_ok=True)
+
+    # Return the auth token
+    return jsonify({
+        'uuid': uuid,
+        'token': token,
+    }), 200
+
+
+@app.route('/auth/check', methods=['POST'])
+def auth_check():
+    # Pull the user information from the body
+    data = request.get_json()
+    uuid = data.get('uuid')
+    nonce = data.get('nonce')
+    signature = data.get('signature')
+
+    # Validate the signature
+    if validate_auth(uuid, nonce, signature):
+        return jsonify({'status': 'pass'}), 200
+    return jsonify({'status': 'fail'}), 400
+
+
+@app.route('/auth/material/<uuid>', methods=['GET'])
+def auth_material(uuid):
+    # Get the user data from the database
     user_row = EXO_DATABASE.get_key_material(uuid)
 
     # No such user exists, use deterministic dummy data
     if user_row is None:
         user_row = generate_dummy_user_row(uuid)
 
-    # Decode inputs
-    signature = b64decode(signature)
-    pubkey_pem = f'-----BEGIN PUBLIC KEY-----\n{user_row["pubkey"]}\n-----END PUBLIC KEY-----'
+    # Send the response
+    return jsonify({
+        'salt': user_row['salt'],
+        'privkey': user_row['privkey'],
+        'iv': user_row['iv'],
+    }), 200
 
-    try:
-        # Load the public key
-        public_key = serialization.load_pem_public_key(pubkey_pem.encode(), backend=default_backend())
 
-        # Verify the signature
-        public_key.verify(
-            signature,
-            nonce,
-            padding.PKCS1v15(),
-            hashes.SHA256()
-        )
+@app.route('/auth/update', methods=['POST'])
+def auth_update():
+    # Pull the user information from the body
+    data = request.get_json()
+    uuid = data.get('uuid')
+    privkey = data.get('private_key')
 
-        # Generate an auth token for the session
-        token = EXO_DATABASE.generate_auth_token(uuid)
+    # Extract the auth token from the header
+    auth_header = request.headers.get('Authorization')
+    auth_token = None
+    if auth_header and auth_header.startswith('Bearer '):
+        auth_token = auth_header[7:]
 
-        # Create the sandbox directory tree
-        sandbox = UPLOAD_FOLDER / uuid
-        sandbox.mkdir(parents=False, exist_ok=True)
-        staging = sandbox / 'staging'
-        staging.mkdir(parents=False, exist_ok=True)
+    # Validate the auth
+    if not EXO_DATABASE.check_token(uuid, auth_token):
+        return jsonify({'status': 'unauthorized'}), 440
 
-        # Return the auth token
-        return jsonify({
-            'uuid': uuid,
-            'token': token,
-        }), 200
-
-    except Exception as e:
-        return f'', 400
+    # Update the private key for the user
+    if EXO_DATABASE.update_user(uuid, privkey):
+        return jsonify({'status': 'pass'}), 200
+    return jsonify({'status': 'fail'}), 400
 
 
 @app.route('/lock/acquire', methods=['POST'])
@@ -267,9 +295,10 @@ def route_get_node(uuid, checksum):
         return jsonify({
             'root': root_hash,
         }), status
+    elif SHA256_RE.fullmatch(checksum) is None:
+        return 'Bad checksum', 422
 
     # Create the shard path
-    # TODO: Possible attack vector... what if there is a bad checksum?
     target_path = sandbox / checksum[0:2] / checksum[2:4] / checksum
 
     # Return encrypted content
@@ -397,8 +426,10 @@ def route_delete_node(uuid, checksum):
     # Determine which checksum to delete
     if checksum == 'root':
         return '', 403
+    elif SHA256_RE.fullmatch(checksum) is None:
+        return 'Bad checksum', 422
 
-    # TODO: Possible attack vector... what if there is a bad checksum?
+    # Process the deletion
     sandbox = UPLOAD_FOLDER / uuid
     delete_file(sandbox, checksum)
     return '', 204
@@ -501,6 +532,44 @@ def generate_dummy_user_row(uuid):
         'iv': b64encode(expand(seed, 12)).decode('utf-8'),
         'nonce': b64encode(expand(seed, 32)).decode('utf-8'),
     }
+
+
+def validate_auth(uuid, nonce, signature):
+    # Validate the nonce has not expired
+    nonce = b64decode(nonce)
+    nonce_hash = hashlib.sha256(nonce).hexdigest()
+    if not EXO_DATABASE.consume_nonce(nonce_hash):
+        return '', 400
+
+    # Get the user from the database
+    user_row = EXO_DATABASE.get_key_material(uuid)
+
+    # No such user exists, use deterministic dummy data
+    if user_row is None:
+        user_row = generate_dummy_user_row(uuid)
+
+    # Decode inputs
+    signature = b64decode(signature)
+    pubkey_pem = f'-----BEGIN PUBLIC KEY-----\n{user_row["pubkey"]}\n-----END PUBLIC KEY-----'
+
+    try:
+        # Load the public key
+        public_key = serialization.load_pem_public_key(pubkey_pem.encode(), backend=default_backend())
+
+        # Verify the signature
+        public_key.verify(
+            signature,
+            nonce,
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+
+        # Verification passed
+        return True
+
+    except Exception as e:
+        # Verification failed
+        return False
 
 
 # Start the HTTP development server

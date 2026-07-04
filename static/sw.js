@@ -1,14 +1,9 @@
 // Global state trackers
 const ivCache = new Map();
-const tokenMap = new Map();
 
-// Initialize chunk sizes just in case something goes wrong
-let CHUNK_P_SIZE = 5 * 1024 * 1024; // 5 MB Plaintext Chunk
-let CHUNK_E_SIZE = CHUNK_P_SIZE + 16; // Plaintext Chunk + 16-byte Auth Tag
-
-// Helper to pull the CryptoKey object out of IndexedDB
+// Helper to pull the Context object out of IndexedDB
 const keyDB = {
-    async getKey(keyId) {
+    async getContext(keyId) {
         return new Promise((resolve, reject) => {
             const req = indexedDB.open('e2ee-store', 1);
             req.onupgradeneeded = (e) => e.target.result.createObjectStore('keys');
@@ -30,30 +25,6 @@ self.addEventListener('activate', (event) => event.waitUntil(clients.claim()));
 // Hook routes
 self.addEventListener('fetch', (event) => {
     const url = new URL(event.request.url);
-
-    if (url.pathname === '/arm-worker' && event.request.method === 'POST') {
-        event.respondWith(
-            (async () => {
-                let data;
-                try {
-                    data = await event.request.json();
-                    if (data.hash && data.authToken && data.settings) {
-                        tokenMap.set(data.hash, `Bearer ${data.authToken}`);
-                        CHUNK_P_SIZE = data.settings.chunk_size * 1024 * 1024;
-                        CHUNK_E_SIZE = CHUNK_P_SIZE + 16;
-                        return new Response(JSON.stringify({ success: true }), {
-                            status: 200,
-                            headers: { 'Content-Type': 'application/json' },
-                        });
-                    }
-                    return new Response('Missing hash or token', { status: 400 });
-                } catch (e) {
-                    return new Response(e, { status: 400 });
-                }
-            })()
-        );
-        return;
-    }
 
     // The File Routes
     if (url.pathname.includes('/node') && event.request.method === 'GET') {
@@ -87,15 +58,8 @@ function extractHashFromUrl(urlObj) {
     return hash;
 }
 
-// Get the key used for a specific request
-async function getKeyForRequest(urlObj) {
-    const hash = extractHashFromUrl(urlObj);
-    if (!hash) return null;
-    return await keyDB.getKey(hash);
-}
-
 // Helper to fetch and cache file metadata
-async function getFileMetadata(cleanServerUrl, authHeader, clientId) {
+async function getFileMetadata(cleanServerUrl, authHeader, clientId, CHUNK_E_SIZE) {
     if (ivCache.has(cleanServerUrl)) return ivCache.get(cleanServerUrl);
 
     // Request just the 12-byte File IV
@@ -142,7 +106,8 @@ async function fetchAndDecryptChunk(
     chunkIndex,
     meta,
     activeDecryptionKey,
-    authHeader
+    authHeader,
+    CHUNK_E_SIZE
 ) {
     // Calculate the encrypted byte bounds on the server
     const serverStart = 12 + chunkIndex * CHUNK_E_SIZE;
@@ -177,8 +142,18 @@ async function handleDecryption(request, clientId) {
     // Extract metadata
     const hash = extractHashFromUrl(urlObj);
 
-    // Look up the auth header
-    const authHeader = request.headers.get('Authorization') || tokenMap.get(hash);
+    // Retrieve the full context from IndexedDB
+    const context = hash ? await keyDB.getContext(hash) : null;
+
+    // Extract properties from the context
+    const activeDecryptionKey = context ? context.key : null;
+    const dbAuthHeader = context && context.auth ? `Bearer ${context.auth}` : null;
+    const authHeader = request.headers.get('Authorization') || dbAuthHeader;
+
+    // Calculate chunk boundaries dynamically based on the stored settings
+    const chunkSizeMb = context && context.chunkSize ? context.chunkSize : 5; // Default to 5 MB
+    const CHUNK_P_SIZE = chunkSizeMb * 1024 * 1024;
+    const CHUNK_E_SIZE = CHUNK_P_SIZE + 16;
 
     // Get the file name before stripping
     const filename = urlObj.searchParams.get('filename');
@@ -193,7 +168,6 @@ async function handleDecryption(request, clientId) {
         (urlObj.searchParams.toString() ? '?' + urlObj.searchParams.toString() : '');
 
     // Validate there is a key
-    const activeDecryptionKey = await getKeyForRequest(urlObj);
     if (!activeDecryptionKey) {
         // Safely construct fallback headers to include auth
         const fallbackHeaders = new Headers(request.headers);
@@ -215,7 +189,7 @@ async function handleDecryption(request, clientId) {
     // Get the IV and dimensions
     let meta;
     try {
-        meta = await getFileMetadata(cleanServerUrl, authHeader, clientId);
+        meta = await getFileMetadata(cleanServerUrl, authHeader, clientId, CHUNK_E_SIZE);
     } catch (err) {
         return err instanceof Response ? err : new Response('Internal Error', { status: 500 });
     }
@@ -256,7 +230,8 @@ async function handleDecryption(request, clientId) {
             startChunkIndex,
             meta,
             activeDecryptionKey,
-            authHeader
+            authHeader,
+            CHUNK_E_SIZE
         );
 
         // Slice out the plaintext bytes requested by the browser
@@ -280,22 +255,28 @@ async function handleDecryption(request, clientId) {
     else {
         resHdrs.set('Content-Length', meta.totalPlaintextSize.toString());
 
+        let chunkIndex = 0;
         const stream = new ReadableStream({
-            async start(controller) {
-                try {
-                    for (let i = 0; i < meta.totalChunks; i++) {
-                        const plainChunk = await fetchAndDecryptChunk(
-                            cleanServerUrl,
-                            i,
-                            meta,
-                            activeDecryptionKey,
-                            authHeader
-                        );
-                        controller.enqueue(new Uint8Array(plainChunk));
-                    }
+            async pull(controller) {
+                if (chunkIndex >= meta.totalChunks) {
                     controller.close();
+                    return;
+                }
+
+                try {
+                    const plainChunk = await fetchAndDecryptChunk(
+                        cleanServerUrl,
+                        chunkIndex,
+                        meta,
+                        activeDecryptionKey,
+                        authHeader,
+                        CHUNK_E_SIZE
+                    );
+
+                    controller.enqueue(new Uint8Array(plainChunk));
+                    chunkIndex++;
                 } catch (err) {
-                    console.error('Decryption stream failed:', err);
+                    console.error(`Decryption stream failed at chunk ${chunkIndex}:`, err);
                     controller.error(err);
                 }
             },
