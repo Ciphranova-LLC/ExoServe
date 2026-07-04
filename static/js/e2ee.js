@@ -283,6 +283,95 @@ function __e2ee_buildPathFromCrumbs(crumbs) {
     return here;
 }
 
+// Upload a single file
+async function e2ee_uploadSingle(file, crumbs) {
+    const virtualCrumbs = __e2ee_createVirtualCrumbs(crumbs);
+    await __e2ee_uploadFile(file, virtualCrumbs);
+    await __e2ee_refreshTableView();
+}
+
+// Upload multiple files
+async function e2ee_uploadMultiple(files, crumbs, folderName = undefined) {
+    if (!folderName) {
+        const firstFile = files[0];
+        folderName = firstFile.webkitRelativePath.split('/')[0];
+    }
+    if (!folderName || folderName.length == 0) {
+        ui_showToast('Failed to get batch upload destination');
+        return;
+    }
+    const folderProgressToast = ui_createFolderProgressToast(folderName);
+
+    try {
+        // Get the total size of all files
+        let totalSize = 0;
+        for (let i = 0; i < files.length; i++) totalSize += files[i].size;
+
+        let uploadedSize = 0;
+
+        // Detach base crumbs from live UI before the loop begins
+        const virtualBaseCrumbs = __e2ee_createVirtualCrumbs(crumbs);
+        const vTreeType =
+            virtualBaseCrumbs.length > 0
+                ? virtualBaseCrumbs[0].getAttribute('data-tree-type')
+                : 'home';
+
+        for (let i = 0; i < files.length; i++) {
+            // Update the progress UI
+            const file = files[i];
+            folderProgressToast.updateFile(file.name);
+
+            // Parse the path of the file
+            const pathParts = file.webkitRelativePath.split('/');
+            const actualFileName = pathParts.pop();
+            const nestedFolders = pathParts;
+
+            // Build a localized crumb trail from the detached virtual base
+            let currentCrumbs = [...virtualBaseCrumbs];
+            for (const folderName of nestedFolders) {
+                const { hash, key } = await __e2ee_ensureFolderExists(folderName, currentCrumbs);
+                let vHash = hash;
+                let vKey = key;
+                const vCrumb = {
+                    innerText: folderName,
+                    textContent: folderName,
+                    getAttribute: (attr) =>
+                        attr === 'data-hash'
+                            ? vHash
+                            : attr === 'data-key'
+                              ? vKey
+                              : attr === 'data-tree-type'
+                                ? vTreeType
+                                : null,
+                    setAttribute: (attr, val) => {
+                        if (attr === 'data-hash') vHash = val;
+                        if (attr === 'data-key') vKey = val;
+                    },
+                };
+                currentCrumbs.push(vCrumb);
+            }
+
+            // Add a customName property to the file
+            Object.defineProperty(file, 'customName', { value: actualFileName });
+
+            // Upload and update
+            await __e2ee_uploadFile(file, currentCrumbs, (createToast = false));
+            uploadedSize += file.size;
+            folderProgressToast.update((uploadedSize / totalSize) * 100);
+        }
+    } catch (e) {
+        console.error(e);
+        folderProgressToast.error('Folder upload failed');
+        return;
+    }
+
+    // If the user hasn't navigated away, refresh the table
+    await __e2ee_refreshTableView();
+
+    // Finalize the master progress toast
+    folderProgressToast.finish('Folder upload successful!');
+}
+
 // Arm the service worker with a key and auth context
 async function e2ee_armWorker(keyObj, hash, auth) {
     // Package all required context into a single object for the Service Worker
@@ -473,19 +562,11 @@ async function e2ee_uploadFile(crumbs) {
     const input = document.createElement('input');
     input.type = 'file';
 
-    // When a file is selected...
+    // When a file is selected, upload it
     input.addEventListener('change', async function (event) {
         const file = event.target.files[0];
         if (!file) return;
-
-        try {
-            const virtualCrumbs = __e2ee_createVirtualCrumbs(crumbs);
-            await __e2ee_uploadFile(file, virtualCrumbs);
-            await __e2ee_refreshTableView();
-        } catch (e) {
-            console.error(e);
-            return;
-        }
+        e2ee_uploadSingle(file, crumbs);
     });
 
     input.click();
@@ -498,86 +579,11 @@ async function e2ee_uploadFolder(crumbs) {
     input.type = 'file';
     input.webkitdirectory = true;
 
-    // When a directory is selected...
+    // When a directory is selected, upload it
     input.addEventListener('change', async function (event) {
         const files = event.target.files;
         if (!files || files.length === 0) return;
-
-        const firstFile = files[0];
-        const folderName = firstFile.webkitRelativePath.split('/')[0];
-        const folderProgressToast = ui_createFolderProgressToast(folderName);
-
-        try {
-            // Get the total size of all files
-            let totalSize = 0;
-            for (let i = 0; i < files.length; i++) totalSize += files[i].size;
-
-            let uploadedSize = 0;
-
-            // Detach base crumbs from live UI before the loop begins
-            const virtualBaseCrumbs = __e2ee_createVirtualCrumbs(crumbs);
-            const vTreeType =
-                virtualBaseCrumbs.length > 0
-                    ? virtualBaseCrumbs[0].getAttribute('data-tree-type')
-                    : 'home';
-
-            for (let i = 0; i < files.length; i++) {
-                // Update the progress UI
-                const file = files[i];
-                folderProgressToast.updateFile(file.name);
-
-                // Parse the path of the file
-                const pathParts = file.webkitRelativePath.split('/');
-                const actualFileName = pathParts.pop();
-                const nestedFolders = pathParts;
-
-                // Build a localized crumb trail from the detached virtual base
-                let currentCrumbs = [...virtualBaseCrumbs];
-                for (const folderName of nestedFolders) {
-                    const { hash, key } = await __e2ee_ensureFolderExists(
-                        folderName,
-                        currentCrumbs
-                    );
-                    let vHash = hash;
-                    let vKey = key;
-                    const vCrumb = {
-                        innerText: folderName,
-                        textContent: folderName,
-                        getAttribute: (attr) =>
-                            attr === 'data-hash'
-                                ? vHash
-                                : attr === 'data-key'
-                                  ? vKey
-                                  : attr === 'data-tree-type'
-                                    ? vTreeType
-                                    : null,
-                        setAttribute: (attr, val) => {
-                            if (attr === 'data-hash') vHash = val;
-                            if (attr === 'data-key') vKey = val;
-                        },
-                    };
-                    currentCrumbs.push(vCrumb);
-                }
-
-                // Add a customName property to the file
-                Object.defineProperty(file, 'customName', { value: actualFileName });
-
-                // Upload and update
-                await __e2ee_uploadFile(file, currentCrumbs, (createToast = false));
-                uploadedSize += file.size;
-                folderProgressToast.update((uploadedSize / totalSize) * 100);
-            }
-        } catch (e) {
-            console.error(e);
-            folderProgressToast.error('Folder upload failed');
-            return;
-        }
-
-        // If the user hasn't navigated away, refresh the table
-        await __e2ee_refreshTableView();
-
-        // Finalize the master progress toast
-        folderProgressToast.finish('Folder upload successful!');
+        e2ee_uploadMultiple(files, crumbs);
     });
 
     input.click();

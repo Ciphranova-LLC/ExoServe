@@ -619,6 +619,137 @@ function ui_hideLoading() {
 
 /******************************/
 
+function ui_initDragAndDrop() {
+    const fileTableContainer = document.getElementById('file-table-container');
+    const dropZoneOverlay = document.getElementById('drop-zone-overlay');
+
+    if (!fileTableContainer || !dropZoneOverlay) {
+        console.error('Drag and drop: Required elements not found');
+        return;
+    }
+
+    // Prevent default drag behaviors
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
+        fileTableContainer.addEventListener(eventName, preventDefaults, false);
+        document.body.addEventListener(eventName, preventDefaults, false);
+    });
+
+    // Highlight drop zone when item is dragged over it
+    ['dragenter', 'dragover'].forEach((eventName) => {
+        fileTableContainer.addEventListener(eventName, highlightDropZone, false);
+    });
+
+    // Remove highlight when item leaves or is dropped
+    ['dragleave', 'drop'].forEach((eventName) => {
+        fileTableContainer.addEventListener(eventName, unhighlightDropZone, false);
+    });
+
+    // Handle dropped files
+    fileTableContainer.addEventListener('drop', handleDrop, false);
+
+    function preventDefaults(e) {
+        e.preventDefault();
+        e.stopPropagation();
+    }
+
+    function highlightDropZone(e) {
+        dropZoneOverlay.classList.remove('hidden');
+    }
+
+    function unhighlightDropZone(e) {
+        if (e.type === 'dragleave' && !e.currentTarget.contains(e.relatedTarget)) {
+            dropZoneOverlay.classList.add('hidden');
+        } else if (e.type === 'drop') {
+            dropZoneOverlay.classList.add('hidden');
+        }
+    }
+
+    async function handleDrop(e) {
+        const crumbs = Array.from(document.querySelectorAll('.crumb'));
+        const dataTransfer = e.dataTransfer;
+        const items = dataTransfer.items;
+
+        if (!items || items.length === 0) {
+            return;
+        }
+
+        // Get files and directories that were dropped
+        const files = [];
+        const directories = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const entry = item.webkitGetAsEntry();
+            if (entry) {
+                if (entry.isFile) {
+                    files.push(item.getAsFile());
+                } else if (entry.isDirectory) {
+                    directories.push(entry);
+                }
+            }
+        }
+
+        // File uploads
+        if (files.length === 1) {
+            e2ee_uploadSingle(files[0], crumbs);
+        } else if (files.length > 1) {
+            e2ee_uploadMultiple(files, crumbs, 'Drag and Drop');
+        }
+
+        // Directory uploads
+        for (const dirEntry of directories) {
+            try {
+                const dirFiles = await getFilesFromDirectory(dirEntry);
+                if (dirFiles.length > 0) {
+                    e2ee_uploadMultiple(dirFiles, crumbs);
+                }
+            } catch (error) {
+                console.error(`Failed to read directory ${dirEntry.name}:`, error);
+                ui_showToast(`Failed to read folder: ${dirEntry.name}`);
+            }
+        }
+    }
+
+    // Resolve all files in a directory
+    async function getFilesFromDirectory(directoryEntry) {
+        const dirReader = directoryEntry.createReader();
+        const entries = await readAllDirectoryEntries(dirReader);
+        const files = [];
+
+        for (const entry of entries) {
+            if (entry.isFile) {
+                const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+                files.push(file);
+            } else if (entry.isDirectory) {
+                const subFiles = await getFilesFromDirectory(entry);
+                files.push(...subFiles);
+            }
+        }
+        return files;
+    }
+
+    // Force the browser to read all entries, no cap
+    function readAllDirectoryEntries(dirReader) {
+        return new Promise((resolve, reject) => {
+            let allEntries = [];
+
+            function read() {
+                dirReader.readEntries((entries) => {
+                    if (entries.length === 0) {
+                        resolve(allEntries);
+                    } else {
+                        allEntries.push(...entries);
+                        read();
+                    }
+                }, reject);
+            }
+
+            read();
+        });
+    }
+}
+
+/******************************/
+
 document.addEventListener('click', (event) => {
     const activeDropdowns = document.querySelectorAll('.dropdown-container.active');
     activeDropdowns.forEach((container) => {
@@ -638,6 +769,7 @@ document.addEventListener('keydown', function (e) {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+    ui_initDragAndDrop();
     ui_initContextMenu();
     ui_initNewFolderModal();
     ui_initRenameNodeModal();
