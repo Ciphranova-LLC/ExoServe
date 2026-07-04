@@ -1,12 +1,7 @@
-@font-face {
-    font-family: 'Wanafi Regular';
-    src: url('../fonts/Wanafi.ttf');
-}
-
 /* Over rides */
 body,
 html {
-    font-family: 'Sans Serif';
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
     background-color: var(--bg-dark);
     width: 100%;
     height: 100vh;
@@ -208,3 +203,4 @@ input:focus {
         height: 40px;
     }
 }
+
