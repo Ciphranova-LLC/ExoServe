@@ -262,11 +262,13 @@ async function __e2ee_refreshTableView(hasLock = false) {
 
     try {
         const activeCrumb = crumbs[crumbs.length - 1];
-        const activeHash = activeCrumb.getAttribute('data-hash');
-        const activeKey = activeCrumb.getAttribute('data-key');
-        const activeName = activeCrumb.innerText;
-        const keyObj = await e2ee_parseKey(KeyType.B64, activeKey);
-        await filetable_table.goToFolder(activeHash, keyObj, activeName, false, true);
+        if (activeCrumb) {
+            const activeHash = activeCrumb.getAttribute('data-hash');
+            const activeKey = activeCrumb.getAttribute('data-key');
+            const activeName = activeCrumb.innerText;
+            const keyObj = await e2ee_parseKey(KeyType.B64, activeKey);
+            await filetable_table.goToFolder(activeHash, keyObj, activeName, false, true);
+        }
     } finally {
         if (!hasLock) await treeLock.release();
     }
