@@ -1,5 +1,6 @@
 import sqlite3
 import shutil
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from secrets import token_bytes
@@ -146,6 +147,12 @@ class ExoDatabase:
         if not self._uuid_exists(uuid):
             return False
 
+        # Rename the sandbox so that the UUID can immediately be used again
+        if sandbox.exists() and sandbox.is_dir():
+            trash_name = f'{sandbox.name}_trash_{token_bytes(16).hex()}'
+            trash_path = sandbox.with_name(trash_name)
+            sandbox.rename(trash_path)
+
         # Delete from all database tables
         with self.get_cursor() as cursor:
             cursor.execute('DELETE FROM user_settings WHERE uuid = ?', (uuid,))
@@ -155,10 +162,13 @@ class ExoDatabase:
             cursor.execute('DELETE FROM users WHERE uuid = ?', (uuid,))
         self.conn.commit()
 
-        # Delete the user's folder on the server
-        # TODO: Spin this up on another thread so that it isn't blocking
-        if sandbox.exists() and sandbox.is_dir():
-            shutil.rmtree(sandbox)
+        # Delete the user's sandbox on a separate thread
+        if trash_path:
+            threading.Thread(
+                target=shutil.rmtree,
+                args=(trash_path,),
+                kwargs={"ignore_errors": True},
+            ).start()
 
         return True
 

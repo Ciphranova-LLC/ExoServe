@@ -1,5 +1,8 @@
 // Routing & View Configuration Logic
 function app_initTableConfig(path) {
+    // Show the loading icon
+    ui_showLoading();
+
     // Clear out the old state entirely
     if (filetable_table) {
         filetable_table.clear();
