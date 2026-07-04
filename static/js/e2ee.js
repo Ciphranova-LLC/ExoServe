@@ -174,24 +174,6 @@ function __e2ee_createVirtualCrumbs(domCrumbs) {
     });
 }
 
-// Helper function to upload a file that has already been selected
-async function __e2ee_uploadFile(file, crumbs, createToast = true) {
-    // Stream the encrypted file to the server
-    const childData = await e2ee_uploadFileChunked(file, createToast);
-
-    // Update the Merkle Tree
-    const newChildName = file.customName || file.name;
-    const childMetadata = {
-        added: Date.now(),
-        type: 'file',
-        size: file.size,
-        hash: childData['hash'],
-        key: childData['key'],
-    };
-    await e2ee_walkMerkleTree(crumbs, newChildName, childMetadata);
-    return;
-}
-
 // Helper function to ensure a folder exists
 async function __e2ee_ensureFolderExists(folderName, crumbs, create = true, hasLock = false) {
     // Acquire lock so this is actually valid
@@ -284,10 +266,26 @@ function __e2ee_buildPathFromCrumbs(crumbs) {
 }
 
 // Upload a single file
-async function e2ee_uploadSingle(file, crumbs) {
-    const virtualCrumbs = __e2ee_createVirtualCrumbs(crumbs);
-    await __e2ee_uploadFile(file, virtualCrumbs);
-    await __e2ee_refreshTableView();
+async function e2ee_uploadSingle(file, crumbs, refreshUi = true, areVirtual = false) {
+    // Detach the UI from the engine if not already done
+    const virtualCrumbs = areVirtual ? crumbs : __e2ee_createVirtualCrumbs(crumbs);
+
+    // Stream the encrypted file to the server
+    const childData = await e2ee_uploadFileChunked(file, refreshUi);
+
+    // Update the Merkle tree
+    const newChildName = file.customName || file.name;
+    const childMetadata = {
+        added: Date.now(),
+        type: 'file',
+        size: file.size,
+        hash: childData['hash'],
+        key: childData['key'],
+    };
+    await e2ee_walkMerkleTree(virtualCrumbs, newChildName, childMetadata);
+
+    // Conditionally refresh the table
+    if (refreshUi) await __e2ee_refreshTableView();
 }
 
 // Upload multiple files
@@ -355,7 +353,7 @@ async function e2ee_uploadMultiple(files, crumbs, folderName = undefined) {
             Object.defineProperty(file, 'customName', { value: actualFileName });
 
             // Upload and update
-            await __e2ee_uploadFile(file, currentCrumbs, (createToast = false));
+            await e2ee_uploadSingle(file, currentCrumbs, false, true);
             uploadedSize += file.size;
             folderProgressToast.update((uploadedSize / totalSize) * 100);
         }
@@ -554,39 +552,6 @@ async function e2ee_uploadFileChunked(file, createToast = true) {
         hash: finalHexHash,
         key: keyBase64,
     };
-}
-
-// Encrypt and upload one file to the server
-async function e2ee_uploadFile(crumbs) {
-    // Create a psuedo-element to select a file
-    const input = document.createElement('input');
-    input.type = 'file';
-
-    // When a file is selected, upload it
-    input.addEventListener('change', async function (event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        e2ee_uploadSingle(file, crumbs);
-    });
-
-    input.click();
-}
-
-// Encrypt and upload a folder to the server
-async function e2ee_uploadFolder(crumbs) {
-    // Create a psuedo-element to select a directory
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.webkitdirectory = true;
-
-    // When a directory is selected, upload it
-    input.addEventListener('change', async function (event) {
-        const files = event.target.files;
-        if (!files || files.length === 0) return;
-        e2ee_uploadMultiple(files, crumbs);
-    });
-
-    input.click();
 }
 
 // Encrypt a whole blob of data on the main thread

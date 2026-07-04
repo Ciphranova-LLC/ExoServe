@@ -58,7 +58,7 @@ function ui_initContextMenu() {
             );
 
             if (restoreItem) {
-                restoreItem.style.display = 'block';
+                restoreItem.style.display = 'flex';
                 restoreItem.setAttribute(
                     'onclick',
                     "ui_showYesNoModal('Restore ', 'ui_submitRestore()')"
@@ -584,15 +584,45 @@ function ui_toggleDropdown(elemId) {
 /******************************/
 
 function ui_triggerFileUpload() {
-    const crumbs = Array.from(document.querySelectorAll('.crumb'));
+    // Close the dropdown
     ui_toggleDropdown('dropdown-upload');
-    e2ee_uploadFile(crumbs);
+
+    // Get the breadcrumbs at the time of upload
+    const crumbs = Array.from(document.querySelectorAll('.crumb'));
+
+    // Create a psuedo-element to select a file
+    const input = document.createElement('input');
+    input.type = 'file';
+
+    // When a file is selected, upload it
+    input.addEventListener('change', async function (event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        e2ee_uploadSingle(file, crumbs);
+    });
+    input.click();
 }
 
 function ui_triggerFolderUpload() {
-    const crumbs = Array.from(document.querySelectorAll('.crumb'));
+    // Close the dropdown
     ui_toggleDropdown('dropdown-upload');
-    e2ee_uploadFolder(crumbs);
+
+    // Get the breadcrumbs at the time of upload
+    const crumbs = Array.from(document.querySelectorAll('.crumb'));
+
+    // Create a psuedo-element to select a directory
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.webkitdirectory = true;
+
+    // When a directory is selected, upload it
+    input.addEventListener('change', async function (event) {
+        const files = event.target.files;
+        if (!files || files.length === 0) return;
+        e2ee_uploadMultiple(files, crumbs);
+    });
+
+    input.click();
 }
 
 /******************************/
@@ -628,7 +658,13 @@ function ui_initDragAndDrop() {
         return;
     }
 
-    // Prevent default drag behaviors
+    // Helper to check if currently on the home page
+    function isHomePage() {
+        return window.location.pathname === '/home';
+    }
+
+    // Prevent default drag behaviors GLOBALLY so the browser doesn't
+    // try to open dropped files and ruin the SPA state on other pages.
     ['dragenter', 'dragover', 'dragleave', 'drop'].forEach((eventName) => {
         fileTableContainer.addEventListener(eventName, preventDefaults, false);
         document.body.addEventListener(eventName, preventDefaults, false);
@@ -653,6 +689,7 @@ function ui_initDragAndDrop() {
     }
 
     function highlightDropZone(e) {
+        if (!isHomePage()) return;
         dropZoneOverlay.classList.remove('hidden');
     }
 
@@ -665,6 +702,7 @@ function ui_initDragAndDrop() {
     }
 
     async function handleDrop(e) {
+        if (!isHomePage()) return;
         const crumbs = Array.from(document.querySelectorAll('.crumb'));
         const dataTransfer = e.dataTransfer;
         const items = dataTransfer.items;
