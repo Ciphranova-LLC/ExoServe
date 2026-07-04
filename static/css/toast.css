@@ -30,3 +30,10 @@
     transform: translateY(0);
     opacity: 1;
 }
+
+/* --- MOBILE --- */
+@media (max-width: 768px) {
+    .toast-container {
+        bottom: calc(64px + env(safe-area-inset-bottom) + 20px);
+    }
+}
