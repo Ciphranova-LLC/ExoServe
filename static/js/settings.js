@@ -126,72 +126,15 @@ function settings_populateDOM() {
 }
 
 async function settings_save() {
-    const settings = {};
-
-    // Get number input values
-    document.querySelectorAll('.number-input[data-setting]').forEach((container) => {
-        const input = container.querySelector('input');
-        const settingKey = container.dataset.setting;
-        settings[settingKey] = parseInt(input.value, 10);
-    });
-
-    // Get checkbox values
-    document.querySelectorAll('input[type="checkbox"][data-setting]').forEach((checkbox) => {
-        const settingKey = checkbox.dataset.setting;
-        settings[settingKey] = checkbox.checked;
-    });
-
-    // Send the settings update to the server
-    ui_showToast('Uploading settings...');
-    const uuid = sessionStorage.getItem('uuid');
-    const authToken = sessionStorage.getItem('auth_token');
-    const res = await network_settingsPost(uuid, authToken, settings);
-    if (res.ok) {
-        settings_db = settings;
-        ui_showToast('Settings saved');
-    } else {
-        ui_showToast('Failed to saved settings');
-    }
+    ui_showToast("Save settings disabled for demo build");
 }
 
 async function settings_changePassword() {
-    const currentPasswordElem = document.getElementById('current_password');
-    const newPasswordElem = document.getElementById('new_password');
-    const confirmPasswordElem = document.getElementById('confirm_password');
-
-    const currentPassword = currentPasswordElem.value;
-    const newPassword = newPasswordElem.value;
-    const confirmPassword = confirmPasswordElem.value;
-
-    // Validate inputs are present
-    if (!currentPassword || !newPassword || !confirmPassword) {
-        ui_showToast('All password fields are required.');
-        return;
-    }
-
-    // Validate new password was not fat fingered
-    if (newPassword !== confirmPassword) {
-        ui_showToast('New passwords do not match.');
-        return;
-    }
-
-    // Pass workflow to keyhandler
-    const status = await keyhandler_changePassword(currentPassword, newPassword);
-    if (!status.changed) {
-        ui_showToast(`Failed to updated password: ${status.reason}`);
-    } else {
-        ui_showToast('Password updated successfully');
-        currentPasswordElem.value = '';
-        newPasswordElem.value = '';
-        confirmPasswordElem.value = '';
-    }
+    ui_showToast("Change password disabled for demo build");
 }
 
 function settings_deleteAccount() {
-    const uuid = sessionStorage.getItem('uuid');
-    const authToken = sessionStorage.getItem('auth_token');
-    const callback = `network_accountDelete('${uuid}', '${authToken}')`;
-    ui_showYesNoModal('Delete account?<br/>This action cannot be undone.', callback);
+    ui_showToast("Account deletion disabled for demo build");
 }
 
 // Listen for navigation events

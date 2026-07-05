@@ -109,10 +109,7 @@ function ui_initNewFolderModal() {
 }
 
 function ui_showNewFolderModal() {
-    const dialog = document.getElementById('modal-newfolder');
-    const input = document.getElementById('newfolder-name');
-    dialog.showModal();
-    input.focus();
+    ui_showToast('New folder creation disabled for demo build');
 }
 
 function ui_closeNewFolderModal() {
@@ -121,14 +118,7 @@ function ui_closeNewFolderModal() {
 }
 
 function ui_submitNewFolderModal() {
-    const dialog = document.getElementById('modal-newfolder');
-    const input = document.getElementById('newfolder-name');
-    const chosenName = input.value;
-    input.value = '';
-
-    const crumbs = Array.from(document.querySelectorAll('.crumb'));
-
-    e2ee_newFolder(null, (folderName = chosenName), crumbs).then((_) => dialog.close());
+    ui_showToast('New folder creation disabled for demo build');
 }
 
 /******************************/
@@ -154,165 +144,13 @@ function ui_closeYesNoModal() {
 }
 
 function ui_submitDelete() {
-    const dialog = document.getElementById('modal-yesno');
-    const crumbs = Array.from(document.querySelectorAll('.crumb'));
-
-    if (window.location.pathname.startsWith('/home')) {
-        // Create a virtual crumb representing the root of the Trash tree
-        let trashVHash = null;
-        let trashVKey = null;
-
-        const destCrumbs = [
-            {
-                innerText: 'Trash',
-                textContent: 'Trash',
-                getAttribute: (attr) => {
-                    if (attr === 'data-hash') return trashVHash;
-                    if (attr === 'data-key') return trashVKey;
-                    if (attr === 'data-name') return 'Trash';
-                    if (attr === 'data-tree-type') return 'trash';
-                    return null;
-                },
-                setAttribute: (attr, val) => {
-                    if (attr === 'data-hash') trashVHash = val;
-                    if (attr === 'data-key') trashVKey = val;
-                },
-            },
-        ];
-
-        // Move to trash using the new generalized function
-        e2ee_moveNode(
-            activeContextNode.hash,
-            activeContextNode.key,
-            activeContextNode.name,
-            crumbs,
-            destCrumbs
-        )
-            .then((_) => {
-                dialog.close();
-                ui_showToast(`Moved ${activeContextNode.name} to trash`);
-            })
-            .catch((err) => {
-                console.error('Failed to move to trash:', err);
-                ui_showToast(`Failed to move ${activeContextNode.name} to trash`);
-            });
-    } else {
-        // Permanent deletion for trash page
-        e2ee_walkMerkleTree(crumbs, activeContextNode.name, null)
-            .then((_) => {
-                dialog.close();
-                __e2ee_refreshTableView(crumbs).then(() =>
-                    ui_showToast(`Permanently deleted ${activeContextNode.name}`)
-                );
-            })
-            .catch((err) => {
-                console.error('Failed to delete node:', err);
-                ui_showToast(`Failed to delete ${activeContextNode.name}`);
-            });
-    }
+    ui_closeYesNoModal();
+    ui_showToast('Delete disabled for demo build');
 }
 
 async function ui_submitRestore() {
-    // Gather required data
-    const dialog = document.getElementById('modal-yesno');
-    const sourceCrumbs = Array.from(document.querySelectorAll('.crumb'));
-    const uuid = sessionStorage.getItem('uuid');
-    const authToken = sessionStorage.getItem('auth_token');
-
-    try {
-        // Resolve the Home root to start building the destination crumbs
-        const homeRootRes = await network_nodeGet(uuid, authToken, 'root', true, 'home');
-        if (homeRootRes.status !== 200) {
-            throw new Error('Could not find Home root.');
-        }
-        const homeRootData = await homeRootRes.json();
-
-        // Initialize the virtual destination breadcrumbs
-        let vHash = homeRootData['root'];
-        let vKey = 'null';
-        const destCrumbs = [
-            {
-                innerText: 'Home',
-                textContent: 'Home',
-                getAttribute: (attr) => {
-                    if (attr === 'data-hash') return vHash;
-                    if (attr === 'data-key') return vKey;
-                    if (attr === 'data-name') return 'Home';
-                    if (attr === 'data-tree-type') return 'home';
-                    return null;
-                },
-                setAttribute: (attr, val) => {
-                    if (attr === 'data-hash') vHash = val;
-                    if (attr === 'data-key') vKey = val;
-                },
-            },
-        ];
-
-        // Parse the original parent path
-        let pathSegments = [];
-        if (activeContextNode.path) {
-            pathSegments = activeContextNode.path.split('/').filter((s) => s.length > 0);
-        }
-
-        // Remove the Home segment since it's already included
-        if (pathSegments.length > 0 && pathSegments[0] === 'Home') {
-            pathSegments.shift();
-        }
-
-        // Traverse the path and ensure it still exists
-        for (const folderName of pathSegments) {
-            let folderResult;
-
-            try {
-                folderResult = await __e2ee_ensureFolderExists(folderName, destCrumbs, false);
-            } catch (e) {
-                ui_showToast(`Restore failed: Destination "${folderName}" is a file.`);
-                if (dialog) dialog.close();
-                return;
-            }
-
-            if (!folderResult) {
-                ui_showToast(`Restore failed: Destination folder "${folderName}" does not exist.`);
-                if (dialog) dialog.close();
-                return;
-            }
-
-            let childHash = folderResult.hash;
-            let childKey = folderResult.key;
-
-            destCrumbs.push({
-                innerText: folderName,
-                textContent: folderName,
-                getAttribute: (attr) => {
-                    if (attr === 'data-hash') return childHash;
-                    if (attr === 'data-key') return childKey;
-                    if (attr === 'data-name') return folderName;
-                    if (attr === 'data-tree-type') return 'home';
-                    return null;
-                },
-                setAttribute: (attr, val) => {
-                    if (attr === 'data-hash') childHash = val;
-                    if (attr === 'data-key') childKey = val;
-                },
-            });
-        }
-
-        // Perform the move
-        await e2ee_moveNode(
-            activeContextNode.hash,
-            activeContextNode.key,
-            activeContextNode.name,
-            sourceCrumbs,
-            destCrumbs
-        );
-
-        if (dialog) dialog.close();
-        ui_showToast(`Restored ${activeContextNode.name}`);
-    } catch (err) {
-        console.error('Failed to restore:', err);
-        ui_showToast(`Failed to restore ${activeContextNode.name}`);
-        if (dialog) dialog.close();
-    }
+    ui_closeYesNoModal();
+    ui_showToast('Restore disabled for demo build');
 }
 
 /******************************/
@@ -329,20 +167,7 @@ function ui_initRenameNodeModal() {
 }
 
 function ui_showRenameNodeModal() {
-    const dialog = document.getElementById('modal-renamenode');
-    const input = document.getElementById('renamenode-name');
-    document.getElementById('renamenode-prompt').innerHTML = `Rename "${activeContextNode.name}"`;
-    input.value = activeContextNode.name;
-    dialog.showModal();
-    input.focus();
-
-    const name = activeContextNode.name;
-    const lastDotIndex = name.lastIndexOf('.');
-    if (lastDotIndex > 0) {
-        input.setSelectionRange(0, lastDotIndex);
-    } else {
-        input.select();
-    }
+    ui_showToast('Rename disabled for demo build');
 }
 
 function ui_closeRenameNodeModal() {
@@ -351,56 +176,8 @@ function ui_closeRenameNodeModal() {
 }
 
 function ui_submitRenameNodeModal() {
-    const dialog = document.getElementById('modal-renamenode');
-    const input = document.getElementById('renamenode-name');
-    const newName = input.value.trim();
-    const oldName = activeContextNode.name;
-
-    if (!newName || newName === oldName) {
-        input.value = '';
-        dialog.close();
-        return;
-    }
-
-    const crumbs = Array.from(document.querySelectorAll('.crumb'));
-    const parentCrumb = crumbs[crumbs.length - 1];
-
-    e2ee_parseKey(KeyType.B64, parentCrumb.getAttribute('data-key')).then((keyObj) => {
-        e2ee_fetchFolder(parentCrumb.getAttribute('data-hash'), keyObj)
-            .then((parentFolder) => {
-                // Ensure the item exists and the new name won't overwrite something else
-                if (!(oldName in parentFolder.children)) {
-                    throw new Error('Item not found in directory.');
-                }
-                if (newName in parentFolder.children) {
-                    throw new Error('Name collision.');
-                }
-                if (newName.includes('/')) {
-                    throw new Error('Invalid name.');
-                }
-
-                // Extract the metadata
-                const itemMetadata = parentFolder.children[oldName];
-
-                // Update the merkle tree
-                return e2ee_walkMerkleTree(crumbs, newName, itemMetadata, false, oldName);
-            })
-            .then(() => {
-                input.value = '';
-                dialog.close();
-                __e2ee_refreshTableView(crumbs).then(() => ui_showToast(`Renamed to "${newName}"`));
-            })
-            .catch((err) => {
-                console.error('Failed to rename node:', err);
-                if (err.message === 'Name collision.') {
-                    alert('A file or folder with that name already exists');
-                } else if (err.message === 'Invalid name.') {
-                    alert('Invalid name');
-                } else {
-                    ui_showToast(`Failed to rename ${oldName}`);
-                }
-            });
-    });
+    ui_closeYesNoModal();
+    ui_showToast('Rename disabled for demo build');
 }
 
 /******************************/
@@ -584,45 +361,13 @@ function ui_toggleDropdown(elemId) {
 /******************************/
 
 function ui_triggerFileUpload() {
-    // Close the dropdown
     ui_toggleDropdown('dropdown-upload');
-
-    // Get the breadcrumbs at the time of upload
-    const crumbs = Array.from(document.querySelectorAll('.crumb'));
-
-    // Create a psuedo-element to select a file
-    const input = document.createElement('input');
-    input.type = 'file';
-
-    // When a file is selected, upload it
-    input.addEventListener('change', async function (event) {
-        const file = event.target.files[0];
-        if (!file) return;
-        e2ee_uploadSingle(file, crumbs);
-    });
-    input.click();
+    ui_showToast('File upload disabled for demo build');
 }
 
 function ui_triggerFolderUpload() {
-    // Close the dropdown
     ui_toggleDropdown('dropdown-upload');
-
-    // Get the breadcrumbs at the time of upload
-    const crumbs = Array.from(document.querySelectorAll('.crumb'));
-
-    // Create a psuedo-element to select a directory
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.webkitdirectory = true;
-
-    // When a directory is selected, upload it
-    input.addEventListener('change', async function (event) {
-        const files = event.target.files;
-        if (!files || files.length === 0) return;
-        e2ee_uploadMultiple(files, crumbs);
-    });
-
-    input.click();
+    ui_showToast('Folder upload disabled for demo build');
 }
 
 /******************************/
@@ -703,86 +448,7 @@ function ui_initDragAndDrop() {
 
     async function handleDrop(e) {
         if (!isHomePage()) return;
-        const crumbs = Array.from(document.querySelectorAll('.crumb'));
-        const dataTransfer = e.dataTransfer;
-        const items = dataTransfer.items;
-
-        if (!items || items.length === 0) {
-            return;
-        }
-
-        // Get files and directories that were dropped
-        const files = [];
-        const directories = [];
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            const entry = item.webkitGetAsEntry();
-            if (entry) {
-                if (entry.isFile) {
-                    files.push(item.getAsFile());
-                } else if (entry.isDirectory) {
-                    directories.push(entry);
-                }
-            }
-        }
-
-        // File uploads
-        if (files.length === 1) {
-            e2ee_uploadSingle(files[0], crumbs);
-        } else if (files.length > 1) {
-            e2ee_uploadMultiple(files, crumbs, 'Drag and Drop');
-        }
-
-        // Directory uploads
-        for (const dirEntry of directories) {
-            try {
-                const dirFiles = await getFilesFromDirectory(dirEntry);
-                if (dirFiles.length > 0) {
-                    e2ee_uploadMultiple(dirFiles, crumbs);
-                }
-            } catch (error) {
-                console.error(`Failed to read directory ${dirEntry.name}:`, error);
-                ui_showToast(`Failed to read folder: ${dirEntry.name}`);
-            }
-        }
-    }
-
-    // Resolve all files in a directory
-    async function getFilesFromDirectory(directoryEntry) {
-        const dirReader = directoryEntry.createReader();
-        const entries = await readAllDirectoryEntries(dirReader);
-        const files = [];
-
-        for (const entry of entries) {
-            if (entry.isFile) {
-                const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
-                files.push(file);
-            } else if (entry.isDirectory) {
-                const subFiles = await getFilesFromDirectory(entry);
-                files.push(...subFiles);
-            }
-        }
-        return files;
-    }
-
-    // Force the browser to read all entries, no cap
-    function readAllDirectoryEntries(dirReader) {
-        return new Promise((resolve, reject) => {
-            let allEntries = [];
-
-            function read() {
-                dirReader.readEntries((entries) => {
-                    if (entries.length === 0) {
-                        resolve(allEntries);
-                    } else {
-                        allEntries.push(...entries);
-                        read();
-                    }
-                }, reject);
-            }
-
-            read();
-        });
+        ui_showToast('Drag and drop disabled for demo build');
     }
 }
 

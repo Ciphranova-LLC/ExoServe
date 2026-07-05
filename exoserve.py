@@ -167,56 +167,17 @@ def auth_submit():
 
 @app.route('/auth/check', methods=['POST'])
 def auth_check():
-    # Pull the user information from the body
-    data = request.get_json()
-    uuid = data.get('uuid')
-    nonce = data.get('nonce')
-    signature = data.get('signature')
-
-    # Validate the signature
-    if validate_auth(uuid, nonce, signature):
-        return jsonify({'status': 'pass'}), 200
-    return jsonify({'status': 'fail'}), 400
+    return jsonify({'message': 'disabled in demo build'}), 403
 
 
 @app.route('/auth/material/<uuid>', methods=['GET'])
 def auth_material(uuid):
-    # Get the user data from the database
-    user_row = EXO_DATABASE.get_key_material(uuid)
-
-    # No such user exists, use deterministic dummy data
-    if user_row is None:
-        user_row = generate_dummy_user_row(uuid)
-
-    # Send the response
-    return jsonify({
-        'salt': user_row['salt'],
-        'privkey': user_row['privkey'],
-        'iv': user_row['iv'],
-    }), 200
+    return jsonify({'message': 'disabled in demo build'}), 403
 
 
 @app.route('/auth/update', methods=['POST'])
 def auth_update():
-    # Pull the user information from the body
-    data = request.get_json()
-    uuid = data.get('uuid')
-    privkey = data.get('private_key')
-
-    # Extract the auth token from the header
-    auth_header = request.headers.get('Authorization')
-    auth_token = None
-    if auth_header and auth_header.startswith('Bearer '):
-        auth_token = auth_header[7:]
-
-    # Validate the auth
-    if not EXO_DATABASE.check_token(uuid, auth_token):
-        return jsonify({'status': 'unauthorized'}), 440
-
-    # Update the private key for the user
-    if EXO_DATABASE.update_user(uuid, privkey):
-        return jsonify({'status': 'pass'}), 200
-    return jsonify({'status': 'fail'}), 400
+    return jsonify({'message': 'disabled in demo build'}), 403
 
 
 @app.route('/lock/acquire', methods=['POST'])
@@ -307,132 +268,12 @@ def route_get_node(uuid, checksum):
 
 @app.route('/node', methods=['POST'])
 def route_post_node():
-    # Pull the user information from the form
-    details = json.loads(request.form['details'])
-    uuid = details.get('uuid')
-    auth = details.get('auth')
-
-    # Validate the auth
-    if not EXO_DATABASE.check_token(uuid, auth):
-        return 'Unauthorized', 440
-    sandbox = UPLOAD_FOLDER / uuid
-    staging = sandbox / 'staging'
-
-    # Validate the lock if not uploading a single chunk
-    # Bypassed if there is no root node yet
-    if details.get('root') or 'stale' in details:
-        lock_key = details.get('lock_key')
-        tree_type = details.get('tree_type', 'home')
-        root_hashes = EXO_DATABASE.get_root_hashes(uuid)
-        if root_hashes[tree_type] is not None and (not lock_key or not EXO_DATABASE.verify_lock(uuid, lock_key)):
-            return 'Active lock required for tree mutation', 423
-
-    # Extract the request details and file payload
-    file_obj = request.files.get('blob')
-    if not file_obj:
-        return 'Missing file payload', 400
-    payload_data = file_obj.read()
-
-    # Determine if this is a chunked upload or a single-shot upload
-    is_chunked = 'chunk_index' in details and 'id' in details
-    final_checksum = None
-
-    if is_chunked:
-        # Extract chunk info
-        realId = hashlib.sha256(details['id'].encode()).hexdigest()
-        staged_file = staging / f'{realId}.part'
-        manifest = staging / f"{realId}.json"
-
-        # Load and sanity check the current upload state
-        state = load_upload_state(manifest)
-        if details['chunk_index'] != state['index']:
-            return 'Received chunks out of order', 403
-
-        # Append new data onto the target
-        with staged_file.open('ab') as f:
-            f.write(payload_data)
-
-        # Update the upload state tracking
-        chunk_hash_hex = hashlib.sha256(payload_data).hexdigest()
-        state['hashes'].append(chunk_hash_hex)
-        state['index'] += 1
-        save_upload_state(manifest, state)
-
-        # If this is not the final chunk, return early
-        if 'checksum' not in details:
-            return jsonify({"status": "pending"}), 200
-
-        # Calculate the hash-of-hashes
-        combined_hashes = b''.join(bytes.fromhex(h) for h in state['hashes'])
-        computed = hashlib.sha256(combined_hashes).hexdigest()
-
-        # Validate the integrity
-        if computed != details['checksum']:
-            staged_file.unlink(missing_ok=True)
-            manifest.unlink(missing_ok=True)
-            return 'Checksum fail', 403
-
-        # Move the file from staging into the sandbox
-        manifest.unlink(missing_ok=True)
-        unstage_file(sandbox, staged_file, computed)
-        final_checksum = computed
-
-    else:
-        # Uploading a whole file
-        if 'checksum' not in details:
-            return 'Missing checksum', 400
-
-        final_checksum = details['checksum']
-        shasum = hashlib.sha256(payload_data).hexdigest()
-
-        # Using a standard return instead of assert to prevent 500 errors
-        if final_checksum != shasum:
-            return 'Integrity check fail', 403
-        new_file(sandbox, final_checksum, payload_data)
-
-    # The full node (single or chunked) is safely in the sandbox
-    # Update the database if modifying the root node
-    if details.get('root'):
-        tree_type = details.get('tree_type', 'home')
-        EXO_DATABASE.upsert_root_hash(uuid, final_checksum, tree_type)
-
-    # Delete the stale node if it exists
-    if 'stale' in details:
-        delete_file(sandbox, details['stale'])
-
-    return jsonify({"status": "success"}), 200
+    return jsonify({'message': 'disabled in demo build'}), 403
 
 
 @app.route('/node/<uuid>/<checksum>', methods=['DELETE'])
 def route_delete_node(uuid, checksum):
-    # Extract the auth token from the header
-    auth_header = request.headers.get('Authorization')
-    auth_token = None
-    if auth_header and auth_header.startswith('Bearer '):
-        auth_token = auth_header[7:]
-
-    # Extract the lock key from the header
-    lock_key = request.headers.get('X-Lock-Key')
-    lock_key = urllib.parse.unquote(lock_key.replace('+', ' '))
-
-    # Validate the auth
-    if not EXO_DATABASE.check_token(uuid, auth_token):
-        return 'Unauthorized', 440
-
-    # Validate the lock
-    if not lock_key or not EXO_DATABASE.verify_lock(uuid, lock_key):
-        return 'Active lock required for deletion', 423
-
-    # Determine which checksum to delete
-    if checksum == 'root':
-        return '', 403
-    elif SHA256_RE.fullmatch(checksum) is None:
-        return 'Bad checksum', 422
-
-    # Process the deletion
-    sandbox = UPLOAD_FOLDER / uuid
-    delete_file(sandbox, checksum)
-    return '', 204
+    return jsonify({'message': 'disabled in demo build'}), 403
 
 
 @app.route('/api/settings/<uuid>', methods=['GET'])
@@ -455,55 +296,12 @@ def route_get_settings(uuid):
 
 @app.route('/api/settings', methods=['POST'])
 def route_post_settings():
-    # Parse the incoming JSON request
-    data = request.get_json()
-    if not data:
-        return 'Bad Request', 400
-    uuid = data.get('uuid')
-
-    # Extract the auth token from the header
-    auth_header = request.headers.get('Authorization')
-    auth_token = None
-    if auth_header and auth_header.startswith('Bearer '):
-        auth_token = auth_header[7:]
-
-    # Validate the auth
-    if not EXO_DATABASE.check_token(uuid, auth_token):
-        return 'Unauthorized', 440
-
-    # Filter the incoming data using the keys from your schema
-    settings = data.get('settings')
-    user_updates = {k: v for k, v in settings.items() if k in USER_SETTINGS_SCHEMA.keys()}
-    server_updates = {k: v for k, v in settings.items() if k in SERVER_SETTINGS_DEFAULTS.keys()}
-
-    # Apply user settings
-    if user_updates:
-        EXO_DATABASE.update_user_settings(uuid, **user_updates)
-
-    # Apply global server settings
-    if server_updates:
-        for key, value in server_updates.items():
-            EXO_DATABASE.update_server_setting(key, value)
-
-    return jsonify({'status': 'success'}), 200
+    return jsonify({'message': 'disabled in demo build'}), 403
 
 
 @app.route('/account/<uuid>', methods=['DELETE'])
 def route_delete_account(uuid):
-    # Extract the auth token from the header
-    auth_header = request.headers.get('Authorization')
-    auth_token = None
-    if auth_header and auth_header.startswith('Bearer '):
-        auth_token = auth_header[7:]
-
-    # Validate the auth
-    if not EXO_DATABASE.check_token(uuid, auth_token):
-        return 'Unauthorized', 440
-    sandbox = UPLOAD_FOLDER / uuid
-
-    # Perform deletion
-    EXO_DATABASE.delete_user(uuid, sandbox)
-    return '', 200
+    return jsonify({'message': 'disabled in demo build'}), 403
 
 
 def generate_dummy_user_row(uuid):
