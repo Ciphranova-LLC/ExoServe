@@ -40,7 +40,7 @@ self.addEventListener('fetch', (event) => {
             }
             event.respondWith(fetch(url.toString(), reqInit));
         } else {
-            event.respondWith(handleDecryption(event.request, event.clientId));
+            event.respondWith(handleDecryption(event));
         }
         return;
     }
@@ -135,7 +135,10 @@ async function fetchAndDecryptChunk(
 }
 
 // Unified stream decryption orchestrator
-async function handleDecryption(request, clientId) {
+async function handleDecryption(event) {
+    const request = event.request;
+    const clientId = event.clientId;
+
     const urlObj = new URL(request.url);
     const ext = (urlObj.searchParams.get('ext') || urlObj.pathname.split('.').pop()).toLowerCase();
 
@@ -255,11 +258,21 @@ async function handleDecryption(request, clientId) {
     else {
         resHdrs.set('Content-Length', meta.totalPlaintextSize.toString());
 
+        // Create a Promise to control the Service Worker lifecycle
+        let keepAliveResolve;
+        const keepAlivePromise = new Promise((resolve) => (keepAliveResolve = resolve));
+
+        // Do not let the browser kill the service worker until this resolves
+        event.waitUntil(keepAlivePromise);
+
         let chunkIndex = 0;
         const stream = new ReadableStream({
             async pull(controller) {
                 if (chunkIndex >= meta.totalChunks) {
                     controller.close();
+                    setTimeout(() => {
+                        keepAliveResolve();
+                    }, 3000);
                     return;
                 }
 
@@ -278,7 +291,11 @@ async function handleDecryption(request, clientId) {
                 } catch (err) {
                     console.error(`Decryption stream failed at chunk ${chunkIndex}:`, err);
                     controller.error(err);
+                    keepAliveResolve();
                 }
+            },
+            cancel() {
+                keepAliveResolve();
             },
         });
 

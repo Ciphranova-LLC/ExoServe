@@ -436,14 +436,20 @@ async function e2ee_downloadFile(hash, keyObj, filename) {
         const path = `/node/${encodeURIComponent(uuid)}/${encodeURIComponent(hash)}`;
         const query = `?filename=${encodeURIComponent(filename)}`;
         const downloadUrl = path + query;
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = filename;
 
-        // Click and cleanup
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => document.body.removeChild(a), 100);
+        // Use a hidden iframe to force Service Worker interception
+        // Using a raw <a> tag will not work on Chrome
+        const iframe = document.createElement('iframe');
+        iframe.style.display = 'none';
+        iframe.src = downloadUrl;
+
+        document.body.appendChild(iframe);
+
+        setTimeout(() => {
+            if (document.body.contains(iframe)) {
+                document.body.removeChild(iframe);
+            }
+        }, 5000);
     } catch (error) {
         console.error('Download error:', error);
         throw error;
