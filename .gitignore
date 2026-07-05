@@ -5,3 +5,4 @@ uploads/*
 !uploads/.gitkeep
 users.db*
 .continue
+release

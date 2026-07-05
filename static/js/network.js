@@ -39,7 +39,6 @@ async function network_authKeyMaterial(uuid) {
 async function network_authUpdate(uuid, auth, privKey) {
     return await fetch('/auth/update', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             uuid: uuid,
             private_key: btoa(String.fromCharCode(...new Uint8Array(privKey))),
