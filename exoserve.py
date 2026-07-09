@@ -37,8 +37,7 @@ HTTPS_PORT = 8000
 # Local folders and files
 HERE = Path(__file__).parent
 UPLOAD_FOLDER = HERE / 'uploads'
-STAGING_FOLDER = UPLOAD_FOLDER / 'staging'
-EXO_DATABASE = ExoDatabase(HERE / 'users.db')
+EXO_DATABASE = ExoDatabase(UPLOAD_FOLDER / 'users.db')
 
 # Create the Flask app
 app = Flask(__name__)
@@ -504,6 +503,11 @@ def route_delete_account(uuid):
     # Perform deletion
     EXO_DATABASE.delete_user(uuid, sandbox)
     return '', 200
+
+
+@app.route('/api/health', methods=['GET'])
+def route_get_health():
+    return jsonify({'status': 'healthy'}), 200
 
 
 def generate_dummy_user_row(uuid):
