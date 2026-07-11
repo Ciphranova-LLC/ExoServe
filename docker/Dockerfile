@@ -1,7 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-COPY ./release /app
+COPY ../release /app
 
 RUN pip install --no-cache-dir Flask cryptography gunicorn && \
     mkdir -p /app/uploads
