@@ -47,6 +47,11 @@ app.secret_key = os.urandom(32)
 SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
 
+@app.route('/license')
+def serve_license():
+    return send_from_directory('.', 'LICENSE', mimetype='text')
+
+
 @app.route('/sw.js')
 def serve_sw():
     return send_from_directory('static', 'sw.js', mimetype='application/javascript')
