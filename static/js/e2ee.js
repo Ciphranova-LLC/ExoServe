@@ -1,5 +1,6 @@
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'wmv'];
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg'];
+const E2EE_MAX_UPLOAD_JOBS = 5;
 
 let currBlobUrl = null;
 
@@ -129,6 +130,39 @@ class MerkleMutex {
     }
 }
 const treeLock = new MerkleMutex();
+
+// Global lock for limiting concurrent upload jobs
+class UploadSemaphore {
+    constructor(maxConcurrent) {
+        this._maxConcurrent = maxConcurrent;
+        this._activeCount = 0;
+        this._queue = [];
+    }
+
+    async acquire() {
+        if (this._activeCount < this._maxConcurrent) {
+            this._activeCount++;
+            return;
+        }
+
+        // Wait in line until an upload slot opens up
+        await new Promise((resolve) => {
+            this._queue.push(resolve);
+        });
+    }
+
+    release() {
+        if (this._queue.length > 0) {
+            // Pass the active slot directly to the next task in the queue
+            const nextTask = this._queue.shift();
+            nextTask();
+        } else {
+            // No tasks waiting, release the slot
+            this._activeCount--;
+        }
+    }
+}
+const uploadLock = new UploadSemaphore(0);
 
 // Escape HTML to prevent disasters
 function escapeHtml(str) {
@@ -290,25 +324,33 @@ function __e2ee_buildPathFromCrumbs(crumbs) {
 
 // Upload a single file
 async function e2ee_uploadSingle(file, crumbs, refreshUi = true, areVirtual = false) {
-    // Detach the UI from the engine if not already done
-    const virtualCrumbs = areVirtual ? crumbs : __e2ee_createVirtualCrumbs(crumbs);
+    // Wait for an available upload slot
+    await uploadLock.acquire();
 
-    // Stream the encrypted file to the server
-    const childData = await e2ee_uploadFileChunked(file, refreshUi);
+    try {
+        // Detach the UI from the engine if not already done
+        const virtualCrumbs = areVirtual ? crumbs : __e2ee_createVirtualCrumbs(crumbs);
 
-    // Update the Merkle tree
-    const newChildName = file.customName || file.name;
-    const childMetadata = {
-        added: Date.now(),
-        type: 'file',
-        size: file.size,
-        hash: childData['hash'],
-        key: childData['key'],
-    };
-    await e2ee_walkMerkleTree(virtualCrumbs, newChildName, childMetadata);
+        // Stream the encrypted file to the server
+        const childData = await e2ee_uploadFileChunked(file, refreshUi);
 
-    // Conditionally refresh the table
-    if (refreshUi) await __e2ee_refreshTableView();
+        // Update the Merkle tree
+        const newChildName = file.customName || file.name;
+        const childMetadata = {
+            added: Date.now(),
+            type: 'file',
+            size: file.size,
+            hash: childData['hash'],
+            key: childData['key'],
+        };
+        await e2ee_walkMerkleTree(virtualCrumbs, newChildName, childMetadata);
+
+        // Conditionally refresh the table
+        if (refreshUi) await __e2ee_refreshTableView();
+    } finally {
+        // Always release the slot for the next file
+        uploadLock.release();
+    }
 }
 
 // Upload multiple files

@@ -208,4 +208,5 @@ document.addEventListener('DOMContentLoaded', async () => {
     } else {
         await settings_fetchDB();
     }
+    uploadLock._maxConcurrent = settings_db['upload_workers'];
 });

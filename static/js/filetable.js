@@ -407,7 +407,7 @@ class FileTable {
         // Folders are not navigable on the trash page
         const isTrashPage = window.location.pathname.startsWith('/trash');
         if (isTrashPage) {
-            ui_showToast('Cannot open folder in trash.')
+            ui_showToast('Cannot open folder in trash.');
             return;
         }
 

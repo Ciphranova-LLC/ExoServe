@@ -1,5 +1,9 @@
 let activeContextNode = null;
 
+let ui_activeToastCount = 0;
+let ui_toastQueue = [];
+let ui_queueTrackerToast = null;
+
 function ui_signOut() {
     sessionStorage.removeItem('uuid');
     sessionStorage.removeItem('auth_token');
@@ -485,6 +489,143 @@ function ui_triggerDownload() {
 
 /******************************/
 
+// Helper to visually update the "Pending Jobs" counter
+function ui_updateQueueTracker() {
+    const pending = ui_toastQueue.length;
+
+    if (pending > 0) {
+        if (!ui_queueTrackerToast) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+
+            // Ensure container supports ordering (failsafe if your CSS doesn't already have it)
+            container.style.display = 'flex';
+            container.style.flexDirection = 'column';
+
+            const toast = document.createElement('div');
+            toast.className = 'toast show';
+
+            // Force this specific toast to the bottom of the flex container
+            toast.style.order = '999';
+            toast.style.marginTop = '8px';
+
+            // Match the standard text styling of your base toasts
+            toast.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span class="toast-title">Pending Jobs in Queue</span>
+                    <span id="queue-tracker-text" style="font-weight: bold; color: goldenrod;">${pending}</span>
+                </div>
+            `;
+
+            container.appendChild(toast);
+            ui_queueTrackerToast = toast;
+
+            // Force browser reflow to ensure the slide-in animation triggers
+            toast.offsetHeight;
+        } else {
+            const textEl = ui_queueTrackerToast.querySelector('#queue-tracker-text');
+            if (textEl) textEl.textContent = pending;
+        }
+    } else if (ui_queueTrackerToast) {
+        ui_queueTrackerToast.classList.remove('show');
+
+        // Detach reference immediately to prevent race conditions
+        const oldToast = ui_queueTrackerToast;
+        ui_queueTrackerToast = null;
+
+        oldToast.addEventListener('transitionend', () => {
+            oldToast.remove();
+        });
+    }
+}
+
+// Intercepts toast creation and returns a proxy object
+function ui_createQueuedProgressToast(titleText, showSubtitle = false, initialSubtitle = '') {
+    const proxy = {
+        _realToast: null,
+        _lastPercent: 0,
+        _lastFile: initialSubtitle,
+        _isDone: false,
+        _finalStatus: null,
+        _finalMsg: '',
+
+        update: function (percent) {
+            this._lastPercent = percent;
+            if (this._realToast) this._realToast.update(percent);
+        },
+
+        updateFile: function (fileName) {
+            this._lastFile = fileName;
+            if (this._realToast) this._realToast.updateFile(fileName);
+        },
+
+        finish: function (successMessage = 'Complete!', autoCloseMs = 3000) {
+            if (this._isDone) return;
+            this._isDone = true;
+            this._finalStatus = 'finish';
+            this._finalMsg = successMessage;
+            if (this._realToast) this._realToast.finish(successMessage, autoCloseMs);
+            ui_handleToastCompletion(this);
+        },
+
+        error: function (errorMessage = 'Failed') {
+            if (this._isDone) return;
+            this._isDone = true;
+            this._finalStatus = 'error';
+            this._finalMsg = errorMessage;
+            if (this._realToast) this._realToast.error(errorMessage);
+            ui_handleToastCompletion(this);
+        },
+    };
+
+    if (ui_activeToastCount < settings_db['upload_workers']) {
+        ui_activateProxyToast(proxy, titleText, showSubtitle);
+    } else {
+        ui_toastQueue.push({ proxy, titleText, showSubtitle });
+        ui_updateQueueTracker();
+    }
+
+    return proxy;
+}
+
+// Binds the proxy to a real DOM element once a slot opens
+function ui_activateProxyToast(proxy, titleText, showSubtitle) {
+    ui_activeToastCount++;
+    proxy._realToast = __ui_createBaseProgressToast(titleText, showSubtitle, proxy._lastFile);
+    proxy._realToast.update(proxy._lastPercent);
+
+    // If the background job finished before it reached the front of the queue
+    if (proxy._isDone) {
+        if (proxy._finalStatus === 'finish') {
+            proxy._realToast.finish(proxy._finalMsg, 3000);
+        } else {
+            proxy._realToast.error(proxy._finalMsg);
+        }
+    }
+}
+
+// Cleans up state when a toast succeeds or fails
+function ui_handleToastCompletion(proxy) {
+    // If it was still in the queue (never rendered), remove it quietly
+    const qIndex = ui_toastQueue.findIndex((item) => item.proxy === proxy);
+    if (qIndex > -1) {
+        ui_toastQueue.splice(qIndex, 1);
+        ui_updateQueueTracker();
+        return;
+    }
+
+    // If it was an active toast, free up a visual slot
+    ui_activeToastCount--;
+
+    // Activate next in line
+    if (ui_toastQueue.length > 0) {
+        const next = ui_toastQueue.shift();
+        ui_activateProxyToast(next.proxy, next.titleText, next.showSubtitle);
+    }
+    ui_updateQueueTracker();
+}
+
+// Show a single notification toast
 function ui_showToast(message, durationMs = 3000) {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -588,17 +729,17 @@ function __ui_createBaseProgressToast(titleText, showSubtitle = false, initialSu
 
 // Wrapper for single file uploads
 function ui_createProgressToast(filename) {
-    return __ui_createBaseProgressToast(`Uploading ${filename}...`, false);
+    return ui_createQueuedProgressToast(`Uploading ${filename}...`, false);
 }
 
 // Wrapper for directory uploads
 function ui_createFolderProgressToast(folderName) {
-    return __ui_createBaseProgressToast(`Uploading ${folderName}...`, true, 'No file selected');
+    return ui_createQueuedProgressToast(`Uploading ${folderName}...`, true, 'No file selected');
 }
 
 // Wrapper for batch operations (delete/restore)
 function ui_createBatchProgressToast(actionTitle) {
-    return __ui_createBaseProgressToast(actionTitle, true, 'Starting...');
+    return ui_createQueuedProgressToast(actionTitle, true, 'Starting...');
 }
 
 /******************************/
@@ -687,7 +828,7 @@ function ui_initDragAndDrop() {
 
     // Helper to check if currently on the home page
     function isHomePage() {
-        return window.location.pathname === '/home';
+        return window.location.pathname.startsWith('/home');
     }
 
     // Prevent default drag behaviors GLOBALLY so the browser doesn't
