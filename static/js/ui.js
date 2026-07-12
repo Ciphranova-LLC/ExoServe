@@ -8,6 +8,16 @@ function ui_signOut() {
 
 /******************************/
 
+function __ui_rowToContextNode(row) {
+    return {
+        hash: row.getAttribute('data-hash'),
+        key: row.getAttribute('data-key'),
+        name: row.getAttribute('data-name'),
+        type: row.classList.contains('folder-row') ? 'folder' : 'file',
+        path: row.getAttribute('data-path') || null,
+    };
+}
+
 function ui_initContextMenu() {
     const contextMenu = document.getElementById('context-menu');
     const tbody = document.getElementById('file-table-body');
@@ -26,13 +36,7 @@ function ui_initContextMenu() {
         event.preventDefault();
 
         // Save the metadata of the clicked row
-        activeContextNode = {
-            hash: row.getAttribute('data-hash'),
-            key: row.getAttribute('data-key'),
-            name: row.getAttribute('data-name'),
-            type: row.classList.contains('folder-row') ? 'folder' : 'file',
-            path: row.getAttribute('data-path') || null,
-        };
+        activeContextNode = __ui_rowToContextNode(row);
 
         // Update context menu based on location (home vs trash)
         const isHomePage = window.location.pathname.startsWith('/home');
@@ -44,7 +48,7 @@ function ui_initContextMenu() {
             deleteItem.innerHTML = '<img src="static/img/trashcan.svg" /> Move to Trash';
             deleteItem.setAttribute(
                 'onclick',
-                "ui_showYesNoModal('Move to trash: ', 'ui_submitDelete()')"
+                "ui_showYesNoModal('Move ', ' to trash?', 'ui_submitDelete()')"
             );
 
             // Hide restore button on Home view
@@ -54,14 +58,14 @@ function ui_initContextMenu() {
             deleteItem.innerHTML = '<img src="static/img/trashcan.svg" /> Permanently Delete';
             deleteItem.setAttribute(
                 'onclick',
-                "ui_showYesNoModal('Permanently delete ', 'ui_submitDelete()')"
+                "ui_showYesNoModal('Permanently delete ', '?', 'ui_submitDelete()')"
             );
 
             if (restoreItem) {
                 restoreItem.style.display = 'flex';
                 restoreItem.setAttribute(
                     'onclick',
-                    "ui_showYesNoModal('Restore ', 'ui_submitRestore()')"
+                    "ui_showYesNoModal('Restore ', '?', 'ui_submitRestore()')"
                 );
             }
         }
@@ -133,13 +137,31 @@ function ui_submitNewFolderModal() {
 
 /******************************/
 
-function ui_showYesNoModal(question, callbackStr) {
+function ui_showYesNoModal(prefix, suffix, callbackStr) {
     const dialog = document.getElementById('modal-yesno');
-    document.getElementById('yesno-question').innerHTML = question;
-    if (activeContextNode) {
-        document.getElementById('yesno-question').innerHTML +=
-            escapeHtml(activeContextNode.name) + '?';
+    let targetName = '';
+
+    if (suffix) {
+        // Dynamically determine if the action applies to a batch or a single node
+        const checkedRows = filetable_table ? filetable_table.getCheckedRows() : [];
+
+        if (checkedRows.length > 1) {
+            targetName = `${checkedRows.length} items`;
+        } else if (checkedRows.length === 1) {
+            const name = checkedRows[0].getAttribute('data-name');
+            targetName = `"${escapeHtml(name)}"`;
+        } else if (activeContextNode) {
+            targetName = `"${escapeHtml(activeContextNode.name)}"`;
+        } else {
+            targetName = 'this item';
+        }
+
+        // Assemble the sentence (e.g. "Move " + "5 items" + " to trash?")
+        document.getElementById('yesno-question').innerHTML = prefix + targetName + suffix;
+    } else {
+        document.getElementById('yesno-question').innerHTML = prefix;
     }
+
     const confirmBtn = document.getElementById('btn-yesno-confirm');
     if (confirmBtn && callbackStr) {
         confirmBtn.setAttribute('onclick', callbackStr);
@@ -153,166 +175,189 @@ function ui_closeYesNoModal() {
     dialog.close();
 }
 
-function ui_submitDelete() {
+async function ui_submitDelete() {
+    // Close the dialog immediately
     const dialog = document.getElementById('modal-yesno');
-    const crumbs = Array.from(document.querySelectorAll('.crumb'));
+    dialog.close();
 
-    if (window.location.pathname.startsWith('/home')) {
+    // Validate that the checkbox header is unchecked
+    filetable_table.checkboxHeader.checked = false;
+
+    const activeTreeType = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
+    const crumbs = __e2ee_createVirtualCrumbs(document.querySelectorAll('.crumb'));
+
+    // Create the batch operation from checked boxes or the single context node
+    const checked_rows = filetable_table.getCheckedRows();
+    const context_nodes =
+        checked_rows.length > 0
+            ? checked_rows.map((cr) => __ui_rowToContextNode(cr))
+            : [activeContextNode];
+
+    const totalItems = context_nodes.length;
+    const s = totalItems > 1 ? 's' : '';
+
+    if (activeTreeType === 'home') {
         // Create a virtual crumb representing the root of the Trash tree
-        let trashVHash = null;
-        let trashVKey = null;
+        const destCrumbs = [__e2ee_createVirtualCrumb('Trash', null, null, 'trash', 0)];
 
-        const destCrumbs = [
-            {
-                innerText: 'Trash',
-                textContent: 'Trash',
-                getAttribute: (attr) => {
-                    if (attr === 'data-hash') return trashVHash;
-                    if (attr === 'data-key') return trashVKey;
-                    if (attr === 'data-name') return 'Trash';
-                    if (attr === 'data-tree-type') return 'trash';
-                    return null;
-                },
-                setAttribute: (attr, val) => {
-                    if (attr === 'data-hash') trashVHash = val;
-                    if (attr === 'data-key') trashVKey = val;
-                },
-            },
-        ];
+        const progress = ui_createBatchProgressToast(`Moving ${totalItems} item${s} to Trash...`);
+        let completed = 0;
 
-        // Move to trash using the new generalized function
-        e2ee_moveNode(
-            activeContextNode.hash,
-            activeContextNode.key,
-            activeContextNode.name,
-            crumbs,
-            destCrumbs
-        )
-            .then((_) => {
-                dialog.close();
-                ui_showToast(`Moved ${activeContextNode.name} to trash`);
-            })
-            .catch((err) => {
+        // Move each target in the batch to the trash tree
+        for (const node of context_nodes) {
+            progress.updateFile(`Moving: ${node.name}`);
+            try {
+                await e2ee_moveNode(node.hash, node.key, node.name, crumbs, destCrumbs);
+                completed++;
+                progress.update((completed / totalItems) * 100);
+
+                // Refresh the table view if the user is looking at the trash
+                if (window.location.pathname.startsWith('/trash')) {
+                    await __e2ee_refreshTableView(false);
+                }
+            } catch (err) {
                 console.error('Failed to move to trash:', err);
-                ui_showToast(`Failed to move ${activeContextNode.name} to trash`);
-            });
+                progress.error(`Failed to move: ${node.name}`);
+                break;
+            }
+        }
+
+        if (completed === totalItems) progress.finish(`Moved ${totalItems} item${s} to Trash`);
     } else {
-        // Permanent deletion for trash page
-        e2ee_walkMerkleTree(crumbs, activeContextNode.name, null)
-            .then((_) => {
-                dialog.close();
-                __e2ee_refreshTableView(crumbs).then(() =>
-                    ui_showToast(`Permanently deleted ${activeContextNode.name}`)
-                );
-            })
-            .catch((err) => {
+        const progress = ui_createBatchProgressToast(`Deleting ${totalItems} item${s}...`);
+        let completed = 0;
+
+        // Permanently delete each target in the batch
+        for (const node of context_nodes) {
+            progress.updateFile(`Deleting: ${node.name}`);
+            try {
+                await e2ee_walkMerkleTree(crumbs, node.name, null);
+                completed++;
+                progress.update((completed / totalItems) * 100);
+
+                // Refresh the table view
+                await __e2ee_refreshTableView(false);
+            } catch (err) {
                 console.error('Failed to delete node:', err);
-                ui_showToast(`Failed to delete ${activeContextNode.name}`);
-            });
+                progress.error(`Failed to delete: ${node.name}`);
+                break;
+            }
+        }
+
+        if (completed === totalItems) progress.finish(`Deleted ${totalItems} item${s}`);
     }
 }
 
 async function ui_submitRestore() {
-    // Gather required data
+    // Close the dialog immediately
     const dialog = document.getElementById('modal-yesno');
-    const sourceCrumbs = Array.from(document.querySelectorAll('.crumb'));
+    dialog.close();
+
+    // Validate that the checkbox header is unchecked
+    filetable_table.checkboxHeader.checked = false;
+
+    const sourceCrumbs = __e2ee_createVirtualCrumbs(document.querySelectorAll('.crumb'));
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
 
+    // Create the batch operation from checked boxes or the single context node
+    const checked_rows = filetable_table.getCheckedRows();
+    const context_nodes =
+        checked_rows.length > 0
+            ? checked_rows.map((cr) => __ui_rowToContextNode(cr))
+            : [activeContextNode];
+
+    const totalItems = context_nodes.length;
+    const s = totalItems > 1 ? 's' : '';
+    const progress = ui_createBatchProgressToast(`Restoring ${totalItems} item${s}...`);
+    let completed = 0;
+
     try {
-        // Resolve the Home root to start building the destination crumbs
+        progress.updateFile('Resolving destination...');
+
+        // Resolve the Home root to start building destination crumbs
         const homeRootRes = await network_nodeGet(uuid, authToken, 'root', true, 'home');
-        if (homeRootRes.status !== 200) {
-            throw new Error('Could not find Home root.');
-        }
+        if (homeRootRes.status !== 200) throw new Error('Could not find Home root.');
         const homeRootData = await homeRootRes.json();
 
-        // Initialize the virtual destination breadcrumbs
-        let vHash = homeRootData['root'];
-        let vKey = 'null';
+        // Initialize the virtual destination breadcrumbs starting with Home root
         const destCrumbs = [
-            {
-                innerText: 'Home',
-                textContent: 'Home',
-                getAttribute: (attr) => {
-                    if (attr === 'data-hash') return vHash;
-                    if (attr === 'data-key') return vKey;
-                    if (attr === 'data-name') return 'Home';
-                    if (attr === 'data-tree-type') return 'home';
-                    return null;
-                },
-                setAttribute: (attr, val) => {
-                    if (attr === 'data-hash') vHash = val;
-                    if (attr === 'data-key') vKey = val;
-                },
-            },
+            __e2ee_createVirtualCrumb('Home', homeRootData['root'], 'null', 'home', 0),
         ];
 
-        // Parse the original parent path
-        let pathSegments = [];
-        if (activeContextNode.path) {
-            pathSegments = activeContextNode.path.split('/').filter((s) => s.length > 0);
-        }
+        // Process each node in the batch
+        for (const node of context_nodes) {
+            progress.updateFile(`Restoring: ${node.name}`);
 
-        // Remove the Home segment since it's already included
-        if (pathSegments.length > 0 && pathSegments[0] === 'Home') {
-            pathSegments.shift();
-        }
-
-        // Traverse the path and ensure it still exists
-        for (const folderName of pathSegments) {
-            let folderResult;
-
-            try {
-                folderResult = await __e2ee_ensureFolderExists(folderName, destCrumbs, false);
-            } catch (e) {
-                ui_showToast(`Restore failed: Destination "${folderName}" is a file.`);
-                if (dialog) dialog.close();
-                return;
+            // Strip the path down to the root for each node
+            while (destCrumbs.length > 1) {
+                destCrumbs.pop();
             }
 
-            if (!folderResult) {
-                ui_showToast(`Restore failed: Destination folder "${folderName}" does not exist.`);
-                if (dialog) dialog.close();
-                return;
+            // Parse the original parent path from the node's stored path metadata
+            let pathSegments = [];
+            if (node.path) {
+                pathSegments = node.path.split('/').filter((str) => str.length > 0);
             }
 
-            let childHash = folderResult.hash;
-            let childKey = folderResult.key;
+            if (pathSegments.length > 0 && pathSegments[0] === 'Home') {
+                pathSegments.shift();
+            }
 
-            destCrumbs.push({
-                innerText: folderName,
-                textContent: folderName,
-                getAttribute: (attr) => {
-                    if (attr === 'data-hash') return childHash;
-                    if (attr === 'data-key') return childKey;
-                    if (attr === 'data-name') return folderName;
-                    if (attr === 'data-tree-type') return 'home';
-                    return null;
-                },
-                setAttribute: (attr, val) => {
-                    if (attr === 'data-hash') childHash = val;
-                    if (attr === 'data-key') childKey = val;
-                },
-            });
+            let pathValid = true;
+
+            // Traverse the path and ensure each folder exists
+            for (const folderName of pathSegments) {
+                try {
+                    const folderResult = await __e2ee_ensureFolderExists(
+                        folderName,
+                        destCrumbs,
+                        false
+                    );
+                    if (!folderResult) {
+                        progress.error(
+                            `Restore failed: Destination folder "${folderName}" does not exist.`
+                        );
+                        pathValid = false;
+                        break;
+                    }
+
+                    // Push dynamically generated child crumbs
+                    destCrumbs.push(
+                        __e2ee_createVirtualCrumb(
+                            folderName,
+                            folderResult.hash,
+                            folderResult.key,
+                            'home',
+                            destCrumbs.length
+                        )
+                    );
+                } catch (e) {
+                    progress.error(`Restore failed: Destination "${folderName}" is a file.`);
+                    pathValid = false;
+                    break;
+                }
+            }
+
+            if (!pathValid) break;
+
+            // Perform the move to restore the node
+            await e2ee_moveNode(node.hash, node.key, node.name, sourceCrumbs, destCrumbs);
+            completed++;
+            progress.update((completed / totalItems) * 100);
+
+            // Refresh the table view
+            await __e2ee_refreshTableView(false);
         }
 
-        // Perform the move
-        await e2ee_moveNode(
-            activeContextNode.hash,
-            activeContextNode.key,
-            activeContextNode.name,
-            sourceCrumbs,
-            destCrumbs
-        );
-
-        if (dialog) dialog.close();
-        ui_showToast(`Restored ${activeContextNode.name}`);
+        if (completed === totalItems) progress.finish(`Restored ${totalItems} item${s}`);
     } catch (err) {
         console.error('Failed to restore:', err);
-        ui_showToast(`Failed to restore ${activeContextNode.name}`);
-        if (dialog) dialog.close();
+        progress.error('Failed to initialize restore process');
     }
+
+    // Validate that the checkbox header is unchecked
+    filetable_table.checkboxHeader.checked = false;
 }
 
 /******************************/
@@ -329,6 +374,13 @@ function ui_initRenameNodeModal() {
 }
 
 function ui_showRenameNodeModal() {
+    // Do not support batch renames yet
+    const checked_rows = filetable_table.getCheckedRows();
+    if (checked_rows.length > 0) {
+        ui_showToast('Batch renames not currently supported.');
+        return;
+    }
+
     const dialog = document.getElementById('modal-renamenode');
     const input = document.getElementById('renamenode-name');
     document.getElementById('renamenode-prompt').innerHTML = `Rename "${activeContextNode.name}"`;
@@ -351,14 +403,16 @@ function ui_closeRenameNodeModal() {
 }
 
 function ui_submitRenameNodeModal() {
+    // Close the dialog
     const dialog = document.getElementById('modal-renamenode');
+    dialog.close();
+
     const input = document.getElementById('renamenode-name');
     const newName = input.value.trim();
     const oldName = activeContextNode.name;
 
     if (!newName || newName === oldName) {
         input.value = '';
-        dialog.close();
         return;
     }
 
@@ -387,8 +441,7 @@ function ui_submitRenameNodeModal() {
             })
             .then(() => {
                 input.value = '';
-                dialog.close();
-                __e2ee_refreshTableView(crumbs).then(() => ui_showToast(`Renamed to "${newName}"`));
+                __e2ee_refreshTableView().then(() => ui_showToast(`Renamed to "${newName}"`));
             })
             .catch((err) => {
                 console.error('Failed to rename node:', err);
@@ -406,6 +459,13 @@ function ui_submitRenameNodeModal() {
 /******************************/
 
 function ui_triggerDownload() {
+    // Do not support batched downloads yet
+    const checked_rows = filetable_table.getCheckedRows();
+    if (checked_rows.length > 0) {
+        ui_showToast('Batch downloads not currently supported.');
+        return;
+    }
+
     // Hide the context menu
     const contextMenu = document.getElementById('context-menu');
     contextMenu.classList.remove('active');
@@ -447,23 +507,32 @@ function ui_showToast(message, durationMs = 3000) {
     }, durationMs);
 }
 
-function ui_createProgressToast(filename) {
+// Helper to create a base progress toast with optional file tracking
+function __ui_createBaseProgressToast(titleText, showSubtitle = false, initialSubtitle = '') {
     const container = document.getElementById('toast-container');
     if (!container) return null;
 
     const toast = document.createElement('div');
     toast.className = 'toast';
 
+    const subtitleHTML = showSubtitle
+        ? `<div class="toast-file-info" style="margin-top: 8px; font-size: 12px; color: #ccc;">
+               <span class="current-file" style="display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${initialSubtitle}</span>
+           </div>`
+        : '';
+
     // Status message, percentage, and progress bar
     toast.innerHTML = `
         <div style="display: flex; justify-content: space-between; gap: 20px; margin-bottom: 8px;">
-            <span class="toast-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Uploading ${filename}...</span>
+            <span class="toast-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${titleText}</span>
             <span class="toast-percent" style="font-weight: bold;">0%</span>
         </div>
         <div style="height: 4px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; overflow: hidden;">
             <div class="toast-progress-fill" style="height: 100%; width: 0%; background: goldenrod; transition: width 0.2s ease-out;"></div>
         </div>
+        ${subtitleHTML}
     `;
+
     container.appendChild(toast);
 
     // Don't let the browser optimize out the animation
@@ -474,6 +543,7 @@ function ui_createProgressToast(filename) {
     const titleEl = toast.querySelector('.toast-title');
     const percentEl = toast.querySelector('.toast-percent');
     const fillEl = toast.querySelector('.toast-progress-fill');
+    const fileEl = toast.querySelector('.current-file');
 
     return {
         // Helper to update the progress bar to a percentage
@@ -483,26 +553,30 @@ function ui_createProgressToast(filename) {
             fillEl.style.width = `${safePercent}%`;
         },
 
+        // Helper to update the subtitle tracking the active file
+        updateFile: (fileName) => {
+            if (fileEl) fileEl.textContent = fileName || '...';
+        },
+
         // Helper to initiate the closing of the sticky toast positively
-        finish: (successMessage = 'Upload complete!', autoCloseMs = 3000) => {
+        finish: (successMessage = 'Complete!', autoCloseMs = 3000) => {
             titleEl.textContent = successMessage;
-            percentEl.textContent = '\u2713'; // checkmark
+            percentEl.textContent = '\u2713';
             fillEl.style.width = '100%';
-            fillEl.style.background = 'green';
+            fillEl.style.background = '#28a745';
+            if (fileEl) fileEl.textContent = 'Done';
 
             setTimeout(() => {
                 toast.classList.remove('show');
-                toast.addEventListener('transitionend', () => {
-                    toast.remove();
-                });
+                toast.addEventListener('transitionend', () => toast.remove());
             }, autoCloseMs);
         },
 
         // Helper to initiate the closing of the sticky toast negatively
-        error: (errorMessage = 'Upload failed') => {
+        error: (errorMessage = 'Failed') => {
             titleEl.textContent = errorMessage;
-            percentEl.textContent = '\u2713'; // X symbol
-            fillEl.style.background = 'red';
+            percentEl.textContent = '\u2717';
+            fillEl.style.background = '#dc3545';
 
             setTimeout(() => {
                 toast.classList.remove('show');
@@ -512,66 +586,19 @@ function ui_createProgressToast(filename) {
     };
 }
 
-function ui_createFolderProgressToast(folderName, fileName = null) {
-    const container = document.getElementById('toast-container');
-    if (!container) return null;
+// Wrapper for single file uploads
+function ui_createProgressToast(filename) {
+    return __ui_createBaseProgressToast(`Uploading ${filename}...`, false);
+}
 
-    const toast = document.createElement('div');
-    toast.className = 'toast';
+// Wrapper for directory uploads
+function ui_createFolderProgressToast(folderName) {
+    return __ui_createBaseProgressToast(`Uploading ${folderName}...`, true, 'No file selected');
+}
 
-    // Status message, percentage, progress bar, and current file name
-    toast.innerHTML = `
-        <div style="display: flex; justify-content: space-between; gap: 20px; margin-bottom: 8px;">
-            <span class="toast-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                Uploading ${folderName}...
-            </span>
-            <span class="toast-percent" style="font-weight: bold;">0%</span>
-        </div>
-        <div style="height: 4px; background: rgba(255, 255, 255, 0.1); border-radius: 2px; overflow: hidden;">
-            <div class="toast-progress-fill" style="height: 100%; width: 0%; background: goldenrod; transition: width 0.2s ease-out;"></div>
-        </div>
-        <div class="toast-file-info" style="margin-top: 8px; font-size: 12px; color: #ccc;">
-            <span class="current-file" style="display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">No file selected</span>
-        </div>
-    `;
-    container.appendChild(toast);
-    toast.offsetHeight;
-    toast.classList.add('show');
-
-    const titleEl = toast.querySelector('.toast-title');
-    const percentEl = toast.querySelector('.toast-percent');
-    const fillEl = toast.querySelector('.toast-progress-fill');
-    const fileEl = toast.querySelector('.current-file');
-
-    return {
-        update: (percent) => {
-            const safePercent = Math.max(0, Math.min(100, Math.round(percent)));
-            percentEl.textContent = `${safePercent}%`;
-            fillEl.style.width = `${safePercent}%`;
-        },
-        updateFile: (fileName) => {
-            fileEl.textContent = fileName || 'No file selected';
-        },
-        finish: (successMessage = 'Upload complete!', autoCloseMs = 3000) => {
-            titleEl.textContent = successMessage;
-            percentEl.textContent = '\u2713';
-            fillEl.style.width = '100%';
-            fillEl.style.background = 'green';
-            setTimeout(() => {
-                toast.classList.remove('show');
-                toast.addEventListener('transitionend', () => toast.remove());
-            }, autoCloseMs);
-        },
-        error: (errorMessage = 'Upload failed') => {
-            titleEl.textContent = errorMessage;
-            percentEl.textContent = '\u2713';
-            fillEl.style.background = 'red';
-            setTimeout(() => {
-                toast.classList.remove('show');
-                toast.addEventListener('transitionend', () => toast.remove());
-            }, 5000);
-        },
-    };
+// Wrapper for batch operations (delete/restore)
+function ui_createBatchProgressToast(actionTitle) {
+    return __ui_createBaseProgressToast(actionTitle, true, 'Starting...');
 }
 
 /******************************/

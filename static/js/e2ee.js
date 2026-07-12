@@ -145,32 +145,55 @@ function escapeHtml(str) {
     );
 }
 
+// Helper to create a single virtual crumb
+function __e2ee_createVirtualCrumb(name, initialHash, initialKey, initialTreeType, depthIndex) {
+    let hash = initialHash;
+    let key = initialKey;
+    let treeType = initialTreeType;
+
+    return {
+        innerText: name,
+        textContent: name,
+        getAttribute: (attr) => {
+            if (attr === 'data-hash') return hash;
+            if (attr === 'data-key') return key;
+            if (attr === 'data-name') return name;
+            if (attr === 'data-tree-type') return treeType;
+            return null;
+        },
+        setAttribute: (attr, val) => {
+            if (attr === 'data-hash') hash = val;
+            if (attr === 'data-key') key = val;
+            if (attr === 'data-tree-type') treeType = val;
+
+            const currentUI = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
+            if (currentUI === treeType) {
+                const breadcrumbList = document.getElementById('breadcrumb-list');
+                if (breadcrumbList && breadcrumbList.children[depthIndex]) {
+                    const targetCrumb = breadcrumbList.children[depthIndex];
+                    const targetName =
+                        targetCrumb.getAttribute('data-name') ||
+                        targetCrumb.innerText ||
+                        targetCrumb.textContent;
+
+                    if (targetName === name) {
+                        targetCrumb.setAttribute(attr, val);
+                    }
+                }
+            }
+        },
+    };
+}
+
 // Helper to detach background tasks from live UI DOM elements
 function __e2ee_createVirtualCrumbs(domCrumbs) {
-    const currentTreeType = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
+    const activeTreeType = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
 
-    return Array.from(domCrumbs).map((c) => {
-        let vHash = c.getAttribute('data-hash');
-        let vKey = c.getAttribute('data-key');
-        let vTreeType = currentTreeType;
-        let vName = c.getAttribute('data-name') || c.innerText || c.textContent;
-
-        return {
-            innerText: vName,
-            textContent: vName,
-            getAttribute: (attr) => {
-                if (attr === 'data-hash') return vHash;
-                if (attr === 'data-key') return vKey;
-                if (attr === 'data-name') return vName;
-                if (attr === 'data-tree-type') return vTreeType;
-                return null;
-            },
-            setAttribute: (attr, val) => {
-                if (attr === 'data-hash') vHash = val;
-                if (attr === 'data-key') vKey = val;
-                if (attr === 'data-tree-type') vTreeType = val;
-            },
-        };
+    return Array.from(domCrumbs).map((c, index) => {
+        const hash = c.getAttribute('data-hash');
+        const key = c.getAttribute('data-key');
+        const name = c.getAttribute('data-name') || c.innerText || c.textContent;
+        return __e2ee_createVirtualCrumb(name, hash, key, activeTreeType, index);
     });
 }
 

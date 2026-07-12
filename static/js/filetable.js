@@ -75,6 +75,13 @@ class FileTable {
         }
     }
 
+    // Get the rows for checked checkboxes
+    getCheckedRows() {
+        const row_checkboxes = this.tbody.querySelectorAll('.checkbox-row');
+        const checked_checkboxes = Array.from(row_checkboxes).filter((cb) => cb.checked);
+        return checked_checkboxes.map((cb) => cb.closest('tr'));
+    }
+
     // Build table header and colgroup based on column config
     buildTableStructure() {
         if (!this.table) return;
@@ -201,7 +208,7 @@ class FileTable {
 
     // Apply row checkbox listeners
     applyRowCheckboxesListeners() {
-        const checkbox_rows = this.tbody.querySelectorAll('.checkbox-row');
+        const checkbox_rows = this.tbody.querySelectorAll('.column-checkbox');
         checkbox_rows.forEach((checkbox) => {
             checkbox.addEventListener('change', () => {
                 if (!checkbox.checked) {

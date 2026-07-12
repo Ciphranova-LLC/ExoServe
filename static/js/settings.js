@@ -191,7 +191,7 @@ function settings_deleteAccount() {
     const uuid = sessionStorage.getItem('uuid');
     const authToken = sessionStorage.getItem('auth_token');
     const callback = `network_accountDelete('${uuid}', '${authToken}')`;
-    ui_showYesNoModal('Delete account?<br/>This action cannot be undone.', callback);
+    ui_showYesNoModal('Delete account?<br/>This action cannot be undone.', undefined, callback);
 }
 
 // Listen for navigation events
