@@ -1,7 +1,6 @@
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'wmv'];
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg'];
 const AUDIO_EXTENSIONS = ['mp3', 'wav', 'aac', 'flac', 'm4a'];
-const E2EE_MAX_UPLOAD_JOBS = 5;
 
 let currBlobUrl = null;
 
