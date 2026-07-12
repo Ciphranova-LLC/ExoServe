@@ -479,6 +479,12 @@ def route_post_settings():
     settings = data.get('settings')
     user_updates = {k: v for k, v in settings.items() if k in USER_SETTINGS_SCHEMA.keys()}
     server_updates = {k: v for k, v in settings.items() if k in SERVER_SETTINGS_DEFAULTS.keys()}
+    
+    # TODO: File Chunk Size breaks the current implementation... quietly switch back to 5
+    user_updates['chunk_size'] = 5
+
+    # TODO: Trashed files are not automatically deleted yet... quietly switch back to 0
+    user_updates['trash_days'] = 0
 
     # Apply user settings
     if user_updates:

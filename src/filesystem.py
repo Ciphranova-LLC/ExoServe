@@ -9,7 +9,7 @@ from time import time
 # Define user settings
 USER_SETTINGS_SCHEMA = {
     'chunk_size': ('INTEGER', 5),
-    'trash_days': ('INTEGER', 30)
+    'trash_days': ('INTEGER', 0)
 }
 
 # Define server settings
