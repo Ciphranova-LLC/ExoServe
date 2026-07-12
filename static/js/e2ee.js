@@ -1,5 +1,6 @@
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'wmv'];
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg'];
+const AUDIO_EXTENSIONS = ['mp3', 'wav', 'aac', 'flac', 'm4a'];
 const E2EE_MAX_UPLOAD_JOBS = 5;
 
 let currBlobUrl = null;
@@ -792,6 +793,13 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
                     <source src="${videoUrl}" type="video/${ext}"></video>`;
         }
 
+        // Streaming from service worker for audio
+        else if (AUDIO_EXTENSIONS.includes(ext)) {
+            const audioUrl = `/node/${uuid}/${hash}?ext=${ext}`;
+            html += `<audio id="preview-content" controls style="width: 100%; position: absolute; bottom: 0; left: 0; border-radius: 0 0 10px 10px;">
+                    <source src="${audioUrl}"></audio>`;
+        }
+
         // Streaming from service worker proxy for images
         else if (IMAGE_EXTENSIONS.includes(ext)) {
             const imageUrl = `/node/${uuid}/${hash}?ext=${ext}`;
@@ -848,7 +856,8 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
         const check = setInterval(() => {
             if (
                 (media.naturalWidth && media.naturalWidth > 0) ||
-                (media.videoWidth && media.videoWidth > 0)
+                (media.videoWidth && media.videoWidth > 0) ||
+                (media.tagName === 'AUDIO' && media.readyState >= 1)
             ) {
                 loader.style.display = 'none';
                 clearInterval(check);
