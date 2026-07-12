@@ -404,6 +404,13 @@ class FileTable {
 
     // Go to folder element (click handler)
     async goToFolderElem(elem, updateBreadcrumbs = true) {
+        // Folders are not navigable on the trash page
+        const isTrashPage = window.location.pathname.startsWith('/trash');
+        if (isTrashPage) {
+            ui_showToast('Cannot open folder in trash.')
+            return;
+        }
+
         const hash = elem.getAttribute('data-hash');
         const name = elem.getAttribute('data-name');
         const keyObj = await e2ee_parseKey(KeyType.B64, elem.getAttribute('data-key'));
