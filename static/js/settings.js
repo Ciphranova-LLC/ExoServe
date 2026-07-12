@@ -19,6 +19,12 @@ async function settings_init() {
         deleteAccountBtn.addEventListener('click', settings_deleteAccount);
     }
 
+    // Bind Sign Out button
+    const signOutBtn = document.getElementById('signout_btn');
+    if (signOutBtn) {
+        signOutBtn.addEventListener('click', ui_signOut);
+    }
+
     // Get the settings from the server
     await settings_fetchDB();
 
