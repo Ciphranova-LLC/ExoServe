@@ -5,3 +5,4 @@ uploads/*
 !uploads/.gitkeep
 .continue
 release
+user_license

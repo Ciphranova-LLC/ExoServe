@@ -7,6 +7,7 @@
         <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" />
 
         <link href="{{ url_for('static', filename='css/variables.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/license.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/custom.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/contextmenu.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/dropdown.css') }}" rel="stylesheet" />
@@ -27,9 +28,11 @@
         <script src="{{ url_for('static', filename='js/search.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/ui.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/license.js') }}" defer></script>
     </head>
 
     <body>
+        <div id="license-banner" class="license-banner license-hidden"></div>
         <div class="layout-main">
             <nav class="sidebar-root">
                 <a
