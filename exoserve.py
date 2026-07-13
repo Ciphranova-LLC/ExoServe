@@ -7,10 +7,11 @@ import re
 import urllib.parse
 
 from base64 import b64encode, b64decode
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.backends import default_backend
-from datetime import datetime
+from datetime import datetime, timezone
 from flask import (
     Flask, jsonify, redirect, render_template, request,
     send_file, send_from_directory, session, url_for
@@ -37,8 +38,9 @@ HTTPS_PORT = 8000
 # Local folders and files
 HERE = Path(__file__).parent
 UPLOAD_FOLDER = HERE / 'uploads'
-STAGING_FOLDER = UPLOAD_FOLDER / 'staging'
-EXO_DATABASE = ExoDatabase(HERE / 'users.db')
+EXO_DATABASE = ExoDatabase(UPLOAD_FOLDER / 'users.db')
+EXO_PUBLIC_KEY = HERE / 'static' / 'pubkey.pem'
+EXO_USER_LICENSE = HERE / 'user_license'
 
 # Create the Flask app
 app = Flask(__name__)
@@ -46,6 +48,11 @@ app.secret_key = os.urandom(32)
 
 # SHA-256 hash format
 SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
+
+
+@app.route('/license')
+def serve_license():
+    return send_from_directory('.', 'LICENSE', mimetype='text')
 
 
 @app.route('/sw.js')
@@ -180,6 +187,106 @@ def auth_update():
     return jsonify({'message': 'disabled in demo build'}), 403
 
 
+@app.route('/auth/license', methods=['GET'])
+def auth_license():
+    try:
+        # Load the public key
+        with EXO_PUBLIC_KEY.open("rb") as f:
+            public_key = serialization.load_pem_public_key(f.read())
+
+        # Read the license
+        with EXO_USER_LICENSE.open('r') as f:
+            user_license = json.load(f)
+        lic_data = user_license["data"]
+
+        # Convert to canonical JSON string
+        lic_data_json = json.dumps(
+            lic_data,
+            sort_keys=True,
+            separators=(",", ":")
+        ).encode()
+
+        # Verify the signature in the license
+        public_key.verify(
+            b64decode(user_license["signature"]),
+            lic_data_json,
+            padding.PKCS1v15(),
+            hashes.SHA256()
+        )
+
+        # Check support status
+        supported = True
+        reason = None
+
+        support_end = lic_data.get("support_end_date")
+        if support_end:
+            support_end = datetime.strptime(
+                support_end,
+                "%Y-%m-%d"
+            ).replace(tzinfo=timezone.utc)
+
+            if datetime.now(timezone.utc) > support_end:
+                supported = False
+                reason = "Support period has expired."
+
+        # All passed
+        return jsonify({
+            "valid": True,
+            "supported": supported,
+            "reason": reason,
+            "data": lic_data
+        }), 200
+
+    except FileNotFoundError:
+        return jsonify({
+            "valid": False,
+            "supported": False,
+            "reason": "License file not found.",
+            "data": {}
+        }), 404
+
+    except json.JSONDecodeError:
+        return jsonify({
+            "valid": False,
+            "supported": False,
+            "reason": "License file is not valid JSON.",
+            "data": {}
+        }), 400
+
+    except KeyError as e:
+        return jsonify({
+            "valid": False,
+            "supported": False,
+            "reason": f"Missing required field: {e.args[0]}",
+            "data": lic_data
+        }), 400
+
+    except InvalidSignature:
+        return jsonify({
+            "valid": False,
+            "supported": False,
+            "reason": "License signature is invalid.",
+            "data": lic_data
+        }), 401
+
+    except ValueError as e:
+        return jsonify({
+            "valid": False,
+            "supported": False,
+            "reason": str(e),
+            "data": lic_data
+        }), 400
+
+    except Exception:
+        current_app.logger.exception("License verification failed")
+        return jsonify({
+            "valid": False,
+            "supported": False,
+            "reason": "Internal error during license verification.",
+            "data": lic_data
+        }), 500
+
+
 @app.route('/lock/acquire', methods=['POST'])
 def lock_acquire():
     # Pull the user information from the parameters
@@ -302,6 +409,11 @@ def route_post_settings():
 @app.route('/account/<uuid>', methods=['DELETE'])
 def route_delete_account(uuid):
     return jsonify({'message': 'disabled in demo build'}), 403
+
+
+@app.route('/api/health', methods=['GET'])
+def route_get_health():
+    return jsonify({'status': 'healthy'}), 200
 
 
 def generate_dummy_user_row(uuid):

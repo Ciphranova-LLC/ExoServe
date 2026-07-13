@@ -1,5 +1,6 @@
 const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'wmv'];
 const VIDEO_EXTENSIONS = ['mp4', 'webm', 'ogg'];
+const AUDIO_EXTENSIONS = ['mp3', 'wav', 'aac', 'flac', 'm4a'];
 
 let currBlobUrl = null;
 
@@ -130,6 +131,39 @@ class MerkleMutex {
 }
 const treeLock = new MerkleMutex();
 
+// Global lock for limiting concurrent upload jobs
+class UploadSemaphore {
+    constructor(maxConcurrent) {
+        this._maxConcurrent = maxConcurrent;
+        this._activeCount = 0;
+        this._queue = [];
+    }
+
+    async acquire() {
+        if (this._activeCount < this._maxConcurrent) {
+            this._activeCount++;
+            return;
+        }
+
+        // Wait in line until an upload slot opens up
+        await new Promise((resolve) => {
+            this._queue.push(resolve);
+        });
+    }
+
+    release() {
+        if (this._queue.length > 0) {
+            // Pass the active slot directly to the next task in the queue
+            const nextTask = this._queue.shift();
+            nextTask();
+        } else {
+            // No tasks waiting, release the slot
+            this._activeCount--;
+        }
+    }
+}
+const uploadLock = new UploadSemaphore(0);
+
 // Escape HTML to prevent disasters
 function escapeHtml(str) {
     return str.replace(
@@ -145,32 +179,55 @@ function escapeHtml(str) {
     );
 }
 
+// Helper to create a single virtual crumb
+function __e2ee_createVirtualCrumb(name, initialHash, initialKey, initialTreeType, depthIndex) {
+    let hash = initialHash;
+    let key = initialKey;
+    let treeType = initialTreeType;
+
+    return {
+        innerText: name,
+        textContent: name,
+        getAttribute: (attr) => {
+            if (attr === 'data-hash') return hash;
+            if (attr === 'data-key') return key;
+            if (attr === 'data-name') return name;
+            if (attr === 'data-tree-type') return treeType;
+            return null;
+        },
+        setAttribute: (attr, val) => {
+            if (attr === 'data-hash') hash = val;
+            if (attr === 'data-key') key = val;
+            if (attr === 'data-tree-type') treeType = val;
+
+            const currentUI = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
+            if (currentUI === treeType) {
+                const breadcrumbList = document.getElementById('breadcrumb-list');
+                if (breadcrumbList && breadcrumbList.children[depthIndex]) {
+                    const targetCrumb = breadcrumbList.children[depthIndex];
+                    const targetName =
+                        targetCrumb.getAttribute('data-name') ||
+                        targetCrumb.innerText ||
+                        targetCrumb.textContent;
+
+                    if (targetName === name) {
+                        targetCrumb.setAttribute(attr, val);
+                    }
+                }
+            }
+        },
+    };
+}
+
 // Helper to detach background tasks from live UI DOM elements
 function __e2ee_createVirtualCrumbs(domCrumbs) {
-    const currentTreeType = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
+    const activeTreeType = window.location.pathname.startsWith('/trash') ? 'trash' : 'home';
 
-    return Array.from(domCrumbs).map((c) => {
-        let vHash = c.getAttribute('data-hash');
-        let vKey = c.getAttribute('data-key');
-        let vTreeType = currentTreeType;
-        let vName = c.getAttribute('data-name') || c.innerText || c.textContent;
-
-        return {
-            innerText: vName,
-            textContent: vName,
-            getAttribute: (attr) => {
-                if (attr === 'data-hash') return vHash;
-                if (attr === 'data-key') return vKey;
-                if (attr === 'data-name') return vName;
-                if (attr === 'data-tree-type') return vTreeType;
-                return null;
-            },
-            setAttribute: (attr, val) => {
-                if (attr === 'data-hash') vHash = val;
-                if (attr === 'data-key') vKey = val;
-                if (attr === 'data-tree-type') vTreeType = val;
-            },
-        };
+    return Array.from(domCrumbs).map((c, index) => {
+        const hash = c.getAttribute('data-hash');
+        const key = c.getAttribute('data-key');
+        const name = c.getAttribute('data-name') || c.innerText || c.textContent;
+        return __e2ee_createVirtualCrumb(name, hash, key, activeTreeType, index);
     });
 }
 
@@ -267,25 +324,33 @@ function __e2ee_buildPathFromCrumbs(crumbs) {
 
 // Upload a single file
 async function e2ee_uploadSingle(file, crumbs, refreshUi = true, areVirtual = false) {
-    // Detach the UI from the engine if not already done
-    const virtualCrumbs = areVirtual ? crumbs : __e2ee_createVirtualCrumbs(crumbs);
+    // Wait for an available upload slot
+    await uploadLock.acquire();
 
-    // Stream the encrypted file to the server
-    const childData = await e2ee_uploadFileChunked(file, refreshUi);
+    try {
+        // Detach the UI from the engine if not already done
+        const virtualCrumbs = areVirtual ? crumbs : __e2ee_createVirtualCrumbs(crumbs);
 
-    // Update the Merkle tree
-    const newChildName = file.customName || file.name;
-    const childMetadata = {
-        added: Date.now(),
-        type: 'file',
-        size: file.size,
-        hash: childData['hash'],
-        key: childData['key'],
-    };
-    await e2ee_walkMerkleTree(virtualCrumbs, newChildName, childMetadata);
+        // Stream the encrypted file to the server
+        const childData = await e2ee_uploadFileChunked(file, refreshUi);
 
-    // Conditionally refresh the table
-    if (refreshUi) await __e2ee_refreshTableView();
+        // Update the Merkle tree
+        const newChildName = file.customName || file.name;
+        const childMetadata = {
+            added: Date.now(),
+            type: 'file',
+            size: file.size,
+            hash: childData['hash'],
+            key: childData['key'],
+        };
+        await e2ee_walkMerkleTree(virtualCrumbs, newChildName, childMetadata);
+
+        // Conditionally refresh the table
+        if (refreshUi) await __e2ee_refreshTableView();
+    } finally {
+        // Always release the slot for the next file
+        uploadLock.release();
+    }
 }
 
 // Upload multiple files
@@ -727,6 +792,13 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
                     <source src="${videoUrl}" type="video/${ext}"></video>`;
         }
 
+        // Streaming from service worker for audio
+        else if (AUDIO_EXTENSIONS.includes(ext)) {
+            const audioUrl = `/node/${uuid}/${hash}?ext=${ext}`;
+            html += `<audio id="preview-content" controls style="width: 100%; position: absolute; bottom: 0; left: 0; border-radius: 0 0 10px 10px;">
+                    <source src="${audioUrl}"></audio>`;
+        }
+
         // Streaming from service worker proxy for images
         else if (IMAGE_EXTENSIONS.includes(ext)) {
             const imageUrl = `/node/${uuid}/${hash}?ext=${ext}`;
@@ -783,7 +855,8 @@ async function e2ee_downloadAndDecrypt(hash, decryptKey, filename) {
         const check = setInterval(() => {
             if (
                 (media.naturalWidth && media.naturalWidth > 0) ||
-                (media.videoWidth && media.videoWidth > 0)
+                (media.videoWidth && media.videoWidth > 0) ||
+                (media.tagName === 'AUDIO' && media.readyState >= 1)
             ) {
                 loader.style.display = 'none';
                 clearInterval(check);

@@ -7,6 +7,7 @@
         <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" />
 
         <link href="{{ url_for('static', filename='css/variables.css') }}" rel="stylesheet" />
+        <link href="{{ url_for('static', filename='css/license.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/custom.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/contextmenu.css') }}" rel="stylesheet" />
         <link href="{{ url_for('static', filename='css/dropdown.css') }}" rel="stylesheet" />
@@ -20,16 +21,18 @@
         <script src="{{ url_for('static', filename='js/network.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/breadcrumbs.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/carousel.js') }}" defer></script>
-        <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
         <script src="{{ url_for('static', filename='js/e2ee.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
         <script src="{{ url_for('static', filename='js/filetable.js') }}"></script>
         <script src="{{ url_for('static', filename='js/key-handler.js') }}"></script>
         <script src="{{ url_for('static', filename='js/search.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/ui.js') }}" defer></script>
         <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+        <script src="{{ url_for('static', filename='js/license.js') }}" defer></script>
     </head>
 
     <body>
+        <div id="license-banner" class="license-banner license-hidden"></div>
         <div class="layout-main">
             <nav class="sidebar-root">
                 <a
@@ -48,12 +51,12 @@
                     <img src="static/img/trashcan.svg" />
                 </div>
 
-                <div class="button" onclick="app_navigateTo('settings')" title="Settings">
+                <div
+                    class="button sidebar-bottom"
+                    onclick="app_navigateTo('settings')"
+                    title="Settings"
+                >
                     <img src="static/img/settings.svg" />
-                </div>
-
-                <div class="button sidebar-bottom" onclick="ui_signOut()" title="Sign Out">
-                    <img src="static/img/logout.svg" />
                 </div>
             </nav>
 

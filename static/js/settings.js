@@ -19,6 +19,12 @@ async function settings_init() {
         deleteAccountBtn.addEventListener('click', settings_deleteAccount);
     }
 
+    // Bind Sign Out button
+    const signOutBtn = document.getElementById('signout_btn');
+    if (signOutBtn) {
+        signOutBtn.addEventListener('click', ui_signOut);
+    }
+
     // Get the settings from the server
     await settings_fetchDB();
 
@@ -54,6 +60,19 @@ function settings_populateDOM() {
             checkbox.checked = settings_db[settingKey];
         }
     });
+
+    // Populate license
+    console.log(license_license);
+    const licenseDetails = document.querySelector('#license-status label');
+    if (!license_license.valid) {
+        licenseDetails.textContent = `Invalid License: ${license_license.reason}`;
+    } else if (!license_license.supported) {
+        licenseDetails.textContent = `License expired on ${license_license.data.support_end_date}`;
+    } else {
+        const tier = license_license.data.tier;
+        const tierName = tier.charAt(0).toUpperCase() + tier.slice(1);
+        licenseDetails.textContent = `${tierName} (expires ${license_license.data.support_end_date})`;
+    }
 
     // Initialize all number-input components
     document.querySelectorAll('.number-input[data-setting]').forEach((container) => {
@@ -146,9 +165,11 @@ window.addEventListener('viewChanged', async (e) => {
 
 // Initialize on page load if already on settings page
 document.addEventListener('DOMContentLoaded', async () => {
+    await license_check();
     if (window.location.pathname === '/settings') {
         await settings_init();
     } else {
         await settings_fetchDB();
     }
+    uploadLock._maxConcurrent = settings_db['upload_workers'];
 });

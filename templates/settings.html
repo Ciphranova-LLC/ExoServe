@@ -16,8 +16,9 @@
         <input type="password" id="confirm_password" />
     </div>
     <div class="button" id="change_password_btn" title="Change Password">Change Password</div>
-    <h3>Delete Account</h3>
-    <div class="setting-item">
+    <h3>Account Management</h3>
+    <div class="setting-item" style="display: flex; gap: 1rem; justify-content: flex-start">
+        <div class="button" id="signout_btn" title="Sign Out">Sign Out</div>
         <div class="button button-danger" id="delete_account_btn" title="Delete Account">
             Delete Account
         </div>
@@ -44,7 +45,7 @@
         </p>
     </div>
     <h3>Software License Status</h3>
-    <div class="setting-item">
+    <div id="license-status" class="setting-item">
         <label>Demo build</label>
         <p>The software license can be installed on the server.</p>
     </div>
@@ -111,6 +112,15 @@
             has the potential to search more quickly, but requires more network bandwidth.
         </p>
     </div>
+    <h3>Concurrent Upload Workers</h3>
+    <div class="setting-item">
+        <div class="number-input" data-setting="upload_workers">
+            <button class="decrease">&minus;</button>
+            <input type="text" value="" />
+            <button class="increase">+</button>
+        </div>
+        <p>Maximum number of concurrent upload jobs that can be performed.</p>
+    </div>
     <h3>File Chunk Size</h3>
     <div class="setting-item">
         <div class="number-input" data-setting="chunk_size">
@@ -118,7 +128,10 @@
             <input type="text" value="" />
             <button class="increase">+</button>
         </div>
-        <p>Size of chunks in MB when streaming file uploads and downloads.</p>
+        <p>
+            Size of chunks in MB when streaming file uploads and downloads (non-functional
+            placeholder).
+        </p>
     </div>
     <h3>Trashed Files</h3>
     <div class="setting-item">
@@ -129,7 +142,15 @@
         </div>
         <p>
             Maximum number of days that files will stay in trash before being permanently deleted
-            automatically.
+            automatically (non-functional placeholder).
+        </p>
+    </div>
+
+    <h2>About ExoServe</h2>
+    <div class="setting-item">
+        <p><a href="/license" target="_blank">Business Source License v1.1 (BSL)</a></p>
+        <p>
+            This license governs the ExoServe software, not the license granted for commercial use.
         </p>
     </div>
 

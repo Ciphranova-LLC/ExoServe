@@ -9,7 +9,7 @@ from time import time
 # Define user settings
 USER_SETTINGS_SCHEMA = {
     'chunk_size': ('INTEGER', 5),
-    'trash_days': ('INTEGER', 30)
+    'trash_days': ('INTEGER', 0),
 }
 
 # Define server settings
@@ -18,6 +18,7 @@ SERVER_SETTINGS_DEFAULTS = {
     'lock_ttl': '60',
     'nonce_ttl': '300',
     'search_workers': '4',
+    'upload_workers': '4',
     'allow_registration': '1',
     'enable_audit_logs': '0'
 }

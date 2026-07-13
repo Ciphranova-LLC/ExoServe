@@ -203,6 +203,11 @@ async function handleDecryption(event) {
         contentType = `image/${ext === 'jpg' ? 'jpeg' : ext}`;
     } else if (['mp4', 'webm', 'ogg'].includes(ext)) {
         contentType = `video/${ext}`;
+    } else if (['mp3', 'wav', 'aac', 'flac', 'm4a'].includes(ext)) {
+        let mimeExt = ext;
+        if (ext === 'mp3') mimeExt = 'mpeg';
+        if (ext === 'm4a') mimeExt = 'mp4';
+        contentType = `audio/${mimeExt}`;
     } else if (ext === 'pdf') {
         contentType = 'application/pdf';
     }

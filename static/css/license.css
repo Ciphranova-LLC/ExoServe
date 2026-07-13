@@ -1,0 +1,20 @@
+.license-banner {
+    background-color: var(--exoserve-red);
+    padding: 0.25rem;
+    text-align: center;
+    font-weight: bold;
+    flex: 0 0 auto;
+    width: 100%;
+
+    a {
+        color: var(--fg);
+        text-decoration: none;
+    }
+    a:hover {
+        text-decoration: underline;
+    }
+}
+
+.license-hidden {
+    display: none;
+}

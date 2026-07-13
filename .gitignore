@@ -3,6 +3,6 @@
 uploads/*
 !uploads
 !uploads/.gitkeep
-users.db*
 .continue
 release
+user_license

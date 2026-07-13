@@ -32,6 +32,13 @@ async function network_authUpdate(uuid, auth, privKey) {
     return null;
 }
 
+async function network_authLicense() {
+    const path = `/auth/license`;
+    return await fetch(path, {
+        method: 'GET',
+    });
+}
+
 async function network_lockAcquire(uuid, auth, key, treeType = 'home') {
     const res = await fetch('/lock/acquire', {
         method: 'POST',

@@ -11,6 +11,9 @@ echo "Building production release in './$RELEASE_DIR'..."
 rm -rf $RELEASE_DIR
 mkdir -p $RELEASE_DIR
 
+# Copy the license
+cp LICENSE $RELEASE_DIR/
+
 # Copy the backend and unminified frontend into the release folder
 echo "Copying files..."
 cp exoserve.py $RELEASE_DIR/
