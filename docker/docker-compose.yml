@@ -1,21 +1,20 @@
 services:
   exoserve:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/ciphranova-llc/exoserve:latest
     container_name: exoserve
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
       - EXOSERVE_IP=0.0.0.0
       - EXOSERVE_PORT=8000
       - EXOSERVE_WORKERS=2
+      - ZERO_KNOWLEDGE_SECRET=CHANGE-THIS-IN-PROD
     volumes:
       - ./uploads:/app/uploads
-    restart: unless-stopped
+      # - ./user_license:/app/user_license:ro # Replace with the path to a license purchased from https://exoserve.ciphranova.com
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
