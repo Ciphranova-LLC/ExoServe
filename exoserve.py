@@ -657,7 +657,7 @@ def validate_auth(uuid, nonce, signature):
     nonce = b64decode(nonce)
     nonce_hash = hashlib.sha256(nonce).hexdigest()
     if not EXO_DATABASE.consume_nonce(nonce_hash):
-        return '', 400
+        return False
 
     # Get the user from the database
     user_row = EXO_DATABASE.get_key_material(uuid)
