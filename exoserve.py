@@ -49,6 +49,12 @@ app.secret_key = os.urandom(32)
 # SHA-256 hash format
 SHA256_RE = re.compile(r"^[a-fA-F0-9]{64}$")
 
+# Version
+APP_VERSION = "ExoServe v0.1.1-beta"
+
+@app.context_processor
+def inject_version():
+    return dict(app_version=APP_VERSION)
 
 @app.route('/license')
 def serve_license():
@@ -83,7 +89,10 @@ def serve_settings():
 @app.route('/login')
 def serve_login():
     settings = EXO_DATABASE.get_server_settings()
-    return render_template('login.html', allow_registration=settings['allow_registration'])
+    return render_template(
+        'login.html',
+        allow_registration=settings['allow_registration']
+    )
 
 
 @app.route('/signup')
