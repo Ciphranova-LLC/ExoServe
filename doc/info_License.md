@@ -7,4 +7,4 @@ ExoServe is shared under the Business Source License (BUSL v1.1). In short, this
 
 ExoServe is free for personal and evaluation use. However, using it in a production or commercial environment requires a user license purchased from Ciphranova LLC.
 
-To read the exact terms and the Additional Use Grant, see [LICENSE.md](../LICENSE.md).
+To read the exact terms and the Additional Use Grant, see [LICENSE](../LICENSE).
